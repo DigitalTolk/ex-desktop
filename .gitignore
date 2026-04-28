@@ -17,6 +17,11 @@ frontend/dist/
 *.msi
 *.exe
 
+# Local env overrides (server URL, secrets — never commit)
+frontend/.env.local
+frontend/.env.*.local
+.env.local
+
 # Editor
 .idea/
 .vscode/settings.json

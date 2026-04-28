@@ -9,6 +9,11 @@ import tailwindcss from '@tailwindcss/vite'
 // `<meta name="app-version">` into the served HTML and exposes the same
 // hash via /api/v1/version — no Vite-side env var to keep in sync.
 
+// Target ex server for the dev proxy.
+// Set EX_SERVER in frontend/.env.local to point at a remote instance.
+// Example: EX_SERVER=https://chat.example.com
+const serverTarget = process.env.EX_SERVER ?? 'http://localhost:8080';
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -24,12 +29,12 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: serverTarget,
         changeOrigin: true,
         ws: true,
       },
       '/auth': {
-        target: 'http://localhost:8080',
+        target: serverTarget,
         changeOrigin: true,
       },
     },
