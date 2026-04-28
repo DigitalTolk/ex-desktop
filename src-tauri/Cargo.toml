@@ -1,0 +1,48 @@
+[package]
+name = "ex-desktop"
+version = "0.1.0"
+description = "ex — desktop client"
+authors = ["DigitalTolk"]
+license = "MIT"
+repository = "https://github.com/DigitalTolk/ex-desktop"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri             = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-log  = "2"
+
+# Phase 1 — auth & secure token storage
+keyring           = "3"
+
+# Phase 2 — native notifications
+tauri-plugin-notification = "2"
+
+# Phase 4 — server config persistence
+tauri-plugin-store = "2"
+
+# Phase 5 — auto-updater
+tauri-plugin-updater = "2"
+
+# Phase 6 — file handling
+tauri-plugin-dialog = "2"
+tauri-plugin-fs     = "2"
+
+# Phase 7 — window state (remember size/position)
+tauri-plugin-window-state = "2"
+
+# Phase 8 — deep links (OIDC callback)
+tauri-plugin-deep-link = "2"
+
+# Utilities
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+log        = "0.4"
+tokio      = { version = "1", features = ["full"] }

@@ -1,0 +1,24 @@
+# Internal development docs (not shipped to consumers)
+docs/
+
+# Rust / Cargo
+target/
+src-tauri/gen/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Tauri build artifacts
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.exe
+
+# Editor
+.idea/
+.vscode/settings.json
+*.swp
+.DS_Store
