@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { playNotificationPing } from '@/lib/notification-sound';
+import { IS_TAURI } from '@/platform';
 
 // NotificationKind mirrors backend service.NotificationKind. Adding a new
 // kind here is the single client-side place where a new alert flavor is
@@ -91,6 +92,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     savePrefs(prefs);
   }, [prefs]);
 
+  // In Tauri, check and request native notification permission on mount.
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    void import('@tauri-apps/plugin-notification').then(async ({ isPermissionGranted, requestPermission }) => {
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        const result = await requestPermission();
+        granted = result === 'granted';
+      }
+      setPermission(granted ? 'granted' : 'denied');
+    });
+  }, []);
+
   const setSoundEnabled = useCallback((v: boolean) => {
     setPrefs((p) => ({ ...p, soundEnabled: v }));
   }, []);
@@ -100,6 +114,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestPermission = useCallback(async (): Promise<Permission> => {
+    if (IS_TAURI) {
+      const { isPermissionGranted, requestPermission: tauriRequest } =
+        await import('@tauri-apps/plugin-notification');
+      const already = await isPermissionGranted();
+      if (already) { setPermission('granted'); return 'granted'; }
+      const result = await tauriRequest();
+      const perm: Permission = result === 'granted' ? 'granted' : 'denied';
+      setPermission(perm);
+      return perm;
+    }
     if (typeof window === 'undefined' || !('Notification' in window)) {
       return 'unsupported';
     }
@@ -158,30 +182,33 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             }
           : undefined,
       });
-      // OS-level popup is the bonus path — only fires when the user has
-      // explicitly granted permission AND the browser is willing to show
-      // it. Failures here are silent because the toast already covered
-      // the user-visible alert.
-      if (
-        prefs.browserEnabled &&
-        typeof window !== 'undefined' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
-      ) {
-        try {
-          const note = new Notification(n.title, {
-            body: n.body,
-            tag: `${n.parentType}:${n.parentID}`,
-            silent: prefs.soundEnabled, // OS sound off when we already played our own
+      // OS-level popup — Tauri uses the native plugin; browser uses the
+      // Web Notification API. Both are bonus paths; the toast above already
+      // covers in-app visibility.
+      if (prefs.browserEnabled) {
+        if (IS_TAURI) {
+          void import('@tauri-apps/plugin-notification').then(({ sendNotification }) => {
+            sendNotification({ title: n.title, body: n.body });
           });
-          note.onclick = () => {
-            window.focus();
-            if (n.deepLink) window.location.href = n.deepLink;
-            note.close();
-          };
-        } catch {
-          // Notification constructor can throw on some embedded browsers;
-          // the toast above is still showing.
+        } else if (
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          try {
+            const note = new Notification(n.title, {
+              body: n.body,
+              tag: `${n.parentType}:${n.parentID}`,
+              silent: prefs.soundEnabled,
+            });
+            note.onclick = () => {
+              window.focus();
+              if (n.deepLink) window.location.href = n.deepLink;
+              note.close();
+            };
+          } catch {
+            // Notification constructor can throw on some embedded browsers.
+          }
         }
       }
     },
