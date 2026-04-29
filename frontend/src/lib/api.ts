@@ -1,4 +1,13 @@
 let accessToken: string | null = null;
+let baseUrl = '';
+
+export function setBaseUrl(url: string) {
+  baseUrl = url.replace(/\/$/, '');
+}
+
+export function getBaseUrl(): string {
+  return baseUrl;
+}
 
 export function setAccessToken(token: string) {
   accessToken = token;
@@ -22,9 +31,14 @@ export class ApiError extends Error {
   }
 }
 
+/** fetch() wrapper that automatically prepends the configured server base URL. */
+export function baseFetch(path: string, options?: RequestInit): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, options);
+}
+
 async function tryRefreshToken(): Promise<boolean> {
   try {
-    const res = await fetch('/auth/token/refresh', {
+    const res = await baseFetch('/auth/token/refresh', {
       method: 'POST',
       credentials: 'include',
     });
@@ -58,7 +72,9 @@ export async function apiFetch<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(path, {
+  const url = `${baseUrl}${path}`;
+
+  const res = await fetch(url, {
     ...options,
     headers,
     credentials: 'include',
@@ -68,7 +84,7 @@ export async function apiFetch<T>(
     const refreshed = await tryRefreshToken();
     if (refreshed) {
       headers.set('Authorization', `Bearer ${accessToken}`);
-      const retry = await fetch(path, {
+      const retry = await fetch(url, {
         ...options,
         headers,
         credentials: 'include',

@@ -25,6 +25,15 @@
       "csp": "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self' http://localhost:* ws://localhost:* https: wss:; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; font-src 'self' data:;"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEQTgyNUYwQjE0MzgxQzQKUldURWdVT3g4Q1dvSFV6RzFNcW9hem00Y0FBV2ZXczFOSmxZWVNYTWNFOStWbVYxa2JnblFwQWUK",
+      "endpoints": [
+        "https://github.com/DigitalTolk/ex-desktop/releases/latest/download/latest.json"
+      ],
+      "dialog": true
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
