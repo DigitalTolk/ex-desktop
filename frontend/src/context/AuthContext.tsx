@@ -14,7 +14,7 @@ import {
   baseFetch,
   getBaseUrl,
 } from '@/lib/api';
-import { IS_TAURI, getRefreshToken, setRefreshToken, deleteRefreshToken } from '@/platform';
+import { IS_TAURI, getRefreshToken, deleteRefreshToken } from '@/platform';
 import { useServer } from '@/context/ServerContext';
 
 interface AuthState {

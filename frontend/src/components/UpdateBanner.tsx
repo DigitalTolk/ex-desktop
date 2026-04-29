@@ -38,8 +38,8 @@ export function UpdateBanner() {
           variant="outline"
           size="sm"
           onClick={async () => {
-            const { getUpdate } = await import('@tauri-apps/plugin-updater');
-            const update = await getUpdate();
+            const { check } = await import('@tauri-apps/plugin-updater');
+            const update = await check();
             if (update) await update.downloadAndInstall();
           }}
         >
