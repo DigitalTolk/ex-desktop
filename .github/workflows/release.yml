@@ -75,5 +75,5 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'ex Desktop ${{ github.ref_name }}'
           releaseBody: 'See CHANGELOG.md for details.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
