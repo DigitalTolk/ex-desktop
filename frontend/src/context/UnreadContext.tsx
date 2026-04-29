@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import { setBadgeCount } from '@/platform';
 
 interface UnreadState {
   unreadChannels: Set<string>;
@@ -89,6 +90,10 @@ export function UnreadProvider({ children }: { children: ReactNode }) {
   }, []);
   const isActiveChannel = useCallback((id: string) => activeChannelRef.current === id, []);
   const isActiveConversation = useCallback((id: string) => activeConvRef.current === id, []);
+
+  useEffect(() => {
+    void setBadgeCount(unreadChannels.size + unreadConversations.size);
+  }, [unreadChannels, unreadConversations]);
 
   return (
     <UnreadContext.Provider value={{

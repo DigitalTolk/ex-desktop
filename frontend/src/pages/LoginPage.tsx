@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
-import { apiFetch, setAccessToken } from '@/lib/api';
+import { useServer } from '@/context/ServerContext';
+import { apiFetch, baseFetch, setAccessToken } from '@/lib/api';
+import { IS_TAURI } from '@/platform';
 import { GENERAL_CHANNEL_SLUG } from '@/lib/roles';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import type { User } from '@/types';
@@ -14,6 +16,7 @@ export default function LoginPage() {
   useDocumentTitle(inviteToken ? 'Accept invite' : 'Sign in');
   const navigate = useNavigate();
   const { login, setAuth } = useAuth();
+  const { serverUrl, clearServer } = useServer();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -27,7 +30,7 @@ export default function LoginPage() {
     setError('');
     setIsSubmitting(true);
     try {
-      const res = await fetch('/auth/login', {
+      const res = await baseFetch('/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -54,7 +57,7 @@ export default function LoginPage() {
     setError('');
     setIsSubmitting(true);
     try {
-      const res = await fetch('/auth/invite/accept', {
+      const res = await baseFetch('/auth/invite/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -81,7 +84,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/40 px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold tracking-tight">
@@ -92,6 +95,11 @@ export default function LoginPage() {
               ? 'Set up your account to get started'
               : 'Sign in to your workspace'}
           </p>
+          {IS_TAURI && serverUrl && (
+            <p className="text-xs text-muted-foreground truncate" title={serverUrl}>
+              {serverUrl}
+            </p>
+          )}
         </div>
 
         {error && (
@@ -128,11 +136,7 @@ export default function LoginPage() {
                 minLength={8}
               />
             </div>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isSubmitting}
-            >
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Setting up...' : 'Create Account'}
             </Button>
           </form>
@@ -192,6 +196,18 @@ export default function LoginPage() {
               </Button>
             </form>
           </>
+        )}
+
+        {IS_TAURI && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={clearServer}
+              className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Change workspace
+            </button>
+          </div>
         )}
       </div>
     </div>

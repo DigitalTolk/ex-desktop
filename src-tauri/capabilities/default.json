@@ -32,6 +32,15 @@
     "updater:default",
     "updater:allow-check",
     "updater:allow-download-and-install",
-    "deep-link:default"
+    "updater:allow-download",
+    "deep-link:default",
+    "autostart:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered"
   ]
 }

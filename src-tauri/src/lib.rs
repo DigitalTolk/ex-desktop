@@ -3,8 +3,9 @@ mod commands;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
+use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,8 +15,13 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_updater::Builder::default().build())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -25,12 +31,27 @@ pub fn run() {
                 )?;
             }
 
+            // Global shortcut: Ctrl+Shift+E shows and focuses the window.
+            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+            let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
+            let handle = app.handle().clone();
+            app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
+                if let Some(w) = handle.get_webview_window("main") {
+                    if w.is_visible().unwrap_or(false) {
+                        let _ = w.set_focus();
+                    } else {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }
+            })?;
+
             let open_i = MenuItem::with_id(app, "open", "Open ex", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;
 
-            let tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -68,6 +89,44 @@ pub fn run() {
             // Keep the tray alive for the app's lifetime.
             app.manage(tray);
 
+            // Check for app updates in the background after a short delay.
+            #[cfg(not(debug_assertions))]
+            {
+                use tauri_plugin_updater::UpdaterExt;
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    if let Ok(updater) = handle.updater() {
+                        if let Ok(Some(_)) = updater.check().await {
+                            let _ = handle.emit("update-available", ());
+                        }
+                    }
+                });
+            }
+
+            // Set the window icon explicitly (needed for Linux taskbar/switcher in dev mode).
+            if let Some(w) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = w.set_icon(icon.clone());
+                }
+            }
+
+            // Register the ex:// URL scheme with the OS.
+            app.deep_link().register("ex").ok();
+
+            // Handle ex:// deep links — bring the window forward and forward
+            // the URL to the frontend so it can navigate.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event: tauri_plugin_deep_link::OpenUrlEvent| {
+                if let Some(w) = handle.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+                for url in event.urls() {
+                    let _ = handle.emit("deep-link", url.to_string());
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -82,6 +141,12 @@ pub fn run() {
             commands::greet,
             commands::get_server_url,
             commands::set_server_url,
+            commands::get_autostart,
+            commands::set_autostart,
+            commands::set_badge_count,
+            commands::get_refresh_token,
+            commands::set_refresh_token,
+            commands::delete_refresh_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ex desktop");

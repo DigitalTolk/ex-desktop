@@ -27,3 +27,4 @@ frontend/.env.*.local
 .vscode/settings.json
 *.swp
 .DS_Store
+src-tauri/updater-key.key

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { setAccessToken, apiFetch } from '@/lib/api';
+import { setAccessToken, apiFetch, baseFetch } from '@/lib/api';
 import { GENERAL_CHANNEL_SLUG } from '@/lib/roles';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import type { User } from '@/types';
@@ -30,7 +30,7 @@ export default function OIDCCallbackPage() {
       if (!token) {
         // Maybe the server set the cookie directly; try refreshing
         try {
-          const res = await fetch('/auth/token/refresh', {
+          const res = await baseFetch('/auth/token/refresh', {
             method: 'POST',
             credentials: 'include',
           });

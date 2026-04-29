@@ -22,7 +22,7 @@ jobs:
     name: Release (${{ matrix.platform }})
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Linux system deps
         if: matrix.platform == 'linux'
@@ -37,7 +37,7 @@ jobs:
             libjavascriptcoregtk-4.1-dev
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -51,13 +51,19 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
       - name: Install frontend deps
-        run: npm --prefix frontend install
+        working-directory: frontend
+        run: npm install
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # macOS code signing (set in repo secrets when ready)
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -65,7 +71,7 @@ jobs:
           # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tauriScript: cargo tauri
+          tauriScript: tauri
           tagName: ${{ github.ref_name }}
           releaseName: 'ex Desktop ${{ github.ref_name }}'
           releaseBody: 'See CHANGELOG.md for details.'
