@@ -109,6 +109,9 @@ pub fn run() {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = w.set_icon(icon.clone());
                 }
+                // Open DevTools automatically so we can diagnose white-screen issues.
+                #[cfg(feature = "devtools")]
+                w.open_devtools();
             }
 
             // Register the ex:// URL scheme with the OS.
