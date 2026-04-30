@@ -35,7 +35,7 @@ pub fn run() {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
             let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
             let handle = app.handle().clone();
-            app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
+            if let Err(e) = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
                 if let Some(w) = handle.get_webview_window("main") {
                     if w.is_visible().unwrap_or(false) {
                         let _ = w.set_focus();
@@ -44,7 +44,9 @@ pub fn run() {
                         let _ = w.set_focus();
                     }
                 }
-            })?;
+            }) {
+                log::warn!("Could not register global shortcut Ctrl+Shift+E (already in use by OS?): {e}");
+            }
 
             let open_i = MenuItem::with_id(app, "open", "Open ex", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
