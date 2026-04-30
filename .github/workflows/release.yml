@@ -51,6 +51,12 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli@^2
 
