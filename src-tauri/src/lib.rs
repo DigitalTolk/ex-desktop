@@ -9,14 +9,21 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebKitGTK's DMA-BUF renderer fails on some Linux/Wayland + GPU driver
-    // combinations with "Could not create default EGL display: EGL_BAD_PARAMETER".
-    // Disable it if the caller hasn't already opted in to a specific renderer.
+    // On Wayland, WebKitGTK's EGL/DMA-BUF renderer fails on some GPU driver
+    // combinations ("Could not create default EGL display: EGL_BAD_PARAMETER").
+    // Force X11/XWayland so GTK uses GLX instead of EGL — XWayland is always
+    // present on GNOME/KDE. Also disable the DMA-BUF renderer as a belt-and-
+    // suspenders measure.
+    // SAFETY: called before any threads are spawned by Tauri or WebKit.
     #[cfg(target_os = "linux")]
-    {
+    unsafe {
+        if std::env::var("WAYLAND_DISPLAY").is_ok()
+            && std::env::var("GDK_BACKEND").is_err()
+        {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
         if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
-            // SAFETY: called before any threads are spawned by Tauri/WebKit.
-            unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
     }
 
