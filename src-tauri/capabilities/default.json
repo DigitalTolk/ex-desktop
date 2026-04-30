@@ -33,6 +33,8 @@
     "updater:allow-check",
     "updater:allow-download-and-install",
     "updater:allow-download",
+    "opener:default",
+    "opener:allow-open-url",
     "deep-link:default",
     "autostart:default",
     "autostart:allow-enable",

@@ -23,6 +23,7 @@ import NewConversationPage from '@/pages/NewConversationPage';
 import ThreadsPage from '@/pages/ThreadsPage';
 import { IS_TAURI } from '@/platform';
 import { useDeepLink } from '@/hooks/useDeepLink';
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 
 const queryClient = new QueryClient({
@@ -52,8 +53,27 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function useExternalLinks() {
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    async function handleClick(e: MouseEvent) {
+      const a = (e.target as Element).closest('a[href]') as HTMLAnchorElement | null;
+      if (!a) return;
+      const href = a.href;
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        e.preventDefault();
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        openUrl(href).catch(console.error);
+      }
+    }
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
+}
+
 function AppRoutes() {
   useDeepLink();
+  useExternalLinks();
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
