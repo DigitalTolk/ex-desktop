@@ -1,7 +1,9 @@
 use keyring::Entry;
-use tauri::{image::Image, AppHandle};
+use tauri::{image::Image, AppHandle, Emitter};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_store::StoreExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 const KEYRING_SERVICE: &str = "com.digitaltolk.ex";
 const KEYRING_REFRESH_TOKEN: &str = "refresh_token";
@@ -72,6 +74,59 @@ pub fn delete_refresh_token() -> Result<(), String> {
         Ok(e) => e.delete_credential().map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Starts a one-shot local HTTP server for the OAuth redirect callback.
+/// Returns the port. When the browser hits /callback?token=..., the command
+/// emits an `oauth-token` event with the token and responds with a success page.
+#[tauri::command]
+pub async fn start_oauth_server(app: AppHandle) -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+
+            // First line: "GET /callback?token=... HTTP/1.1"
+            let token = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|path| path.split('?').nth(1))
+                .and_then(|query| {
+                    query.split('&').find_map(|kv| {
+                        let mut it = kv.splitn(2, '=');
+                        if it.next()? == "token" { it.next().map(String::from) } else { None }
+                    })
+                });
+
+            let html = if token.is_some() {
+                "<html><head><title>Signed in</title></head><body>\
+                 <h2>Sign-in successful — you can close this tab.</h2>\
+                 <script>window.close()</script></body></html>"
+            } else {
+                "<html><body><h2>Sign-in failed — no token received.</h2></body></html>"
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                html.len(),
+                html
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.flush().await;
+
+            if let Some(t) = token {
+                let _ = app.emit("oauth-token", t);
+            }
+        }
+    });
+
+    Ok(port)
 }
 
 /// Updates the tray icon and tooltip to reflect the unread message count.

@@ -85,22 +85,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(() => {
     const base = serverUrl ?? getBaseUrl();
     if (IS_TAURI) {
-      // Open SSO in the system browser so WebKit is not involved in the OAuth
-      // redirect chain. WebKit rejects HTTP 302 redirects to non-HTTP schemes
-      // (e.g. tauri://) with "Redirection to URL with a scheme that is not
-      // HTTP(S)". Using the system browser avoids this entirely.
-      //
-      // The server redirects to ex://app/oidc/callback?token=... after auth.
-      // The OS delivers this as a deep link, useDeepLink() navigates to
-      // /oidc/callback?token=..., and OIDCCallbackPage completes sign-in.
-      const redirectTo = 'ex://app/oidc/callback';
-      import('@tauri-apps/plugin-opener').then(({ openUrl }) => {
+      // Start a one-shot local HTTP server, open SSO in the system browser
+      // with redirect_to=http://localhost:{port}/callback. The server hits
+      // that endpoint after auth and we emit 'oauth-token' with the token.
+      // More reliable than custom URL schemes: no OS registration needed,
+      // works in all browsers, no single-instance complexity.
+      Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/api/event'),
+        import('@tauri-apps/plugin-opener'),
+      ]).then(async ([{ invoke }, { listen }, { openUrl }]) => {
+        const port = await invoke<number>('start_oauth_server');
+        const redirectTo = `http://localhost:${port}/callback`;
+
+        const unlisten = await listen<string>('oauth-token', async (event) => {
+          unlisten();
+          const token = event.payload;
+          setAccessToken(token);
+          try {
+            const user = await apiFetch<User>('/api/v1/users/me');
+            setAuth(token, user);
+          } catch {
+            // token arrived but /users/me failed — stay on login
+          }
+        });
+
         openUrl(`${base}/auth/oidc/login?redirect_to=${encodeURIComponent(redirectTo)}`);
       });
     } else {
       window.location.href = `${base}/auth/oidc/login`;
     }
-  }, [serverUrl]);
+  }, [serverUrl, setAuth]);
 
   const logout = useCallback(async () => {
     try {

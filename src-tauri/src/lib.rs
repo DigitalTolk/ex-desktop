@@ -199,6 +199,7 @@ pub fn run() {
             commands::get_refresh_token,
             commands::set_refresh_token,
             commands::delete_refresh_token,
+            commands::start_oauth_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ex desktop");
