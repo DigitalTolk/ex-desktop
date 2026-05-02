@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { setAccessToken, apiFetch, baseFetch } from '@/lib/api';
 import { GENERAL_CHANNEL_SLUG } from '@/lib/roles';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { toast } from 'sonner';
 import type { User } from '@/types';
 
 export default function OIDCCallbackPage() {
@@ -14,7 +15,6 @@ export default function OIDCCallbackPage() {
 
   useEffect(() => {
     async function handleCallback() {
-      // Try URL hash fragment first, then query param
       const hash = window.location.hash;
       let token: string | null = null;
 
@@ -27,8 +27,9 @@ export default function OIDCCallbackPage() {
         token = searchParams.get('token') || searchParams.get('access_token');
       }
 
+      toast.info(`[debug] OIDCCallback: token=${token ? token.slice(0, 20) + '…' : 'null'}`);
+
       if (!token) {
-        // Maybe the server set the cookie directly; try refreshing
         try {
           const res = await baseFetch('/auth/token/refresh', {
             method: 'POST',
@@ -50,12 +51,11 @@ export default function OIDCCallbackPage() {
           setAuth(token, user);
           navigate(`/channel/${GENERAL_CHANNEL_SLUG}`, { replace: true });
           return;
-        } catch {
-          // fall through to error
+        } catch (e) {
+          toast.error(`[debug] /users/me failed: ${e}`);
         }
       }
 
-      // Failed to authenticate
       navigate('/login', { replace: true });
     }
 
