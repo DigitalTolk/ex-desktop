@@ -51,6 +51,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ hashFiles('frontend/src/**') }}
 
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli@^2

@@ -56,6 +56,8 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Include frontend source in cache key so Rust rebuilds when JS changes
+          key: ${{ hashFiles('frontend/src/**') }}
 
       - name: Sync version from tag
         shell: bash
