@@ -82,6 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tryRestore();
   }, []);
 
+  const setAuth = useCallback((token: string, userData: User) => {
+    setAccessToken(token);
+    setUser(userData);
+  }, []);
+
   const login = useCallback(() => {
     const base = serverUrl ?? getBaseUrl();
     if (IS_TAURI) {
@@ -129,11 +134,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearAccessToken();
     setUser(null);
     await deleteRefreshToken();
-  }, []);
-
-  const setAuth = useCallback((token: string, userData: User) => {
-    setAccessToken(token);
-    setUser(userData);
   }, []);
 
   return (
