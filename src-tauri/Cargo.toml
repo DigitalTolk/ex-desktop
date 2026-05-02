@@ -38,8 +38,9 @@ tauri-plugin-fs     = "2"
 # Phase 7 — window state (remember size/position)
 tauri-plugin-window-state = "2"
 
-# Phase 8 — deep links (OIDC callback)
+# Phase 8 — deep links (OIDC callback) + single-instance enforcement
 tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
 
 # Utilities
 serde      = { version = "1", features = ["derive"] }

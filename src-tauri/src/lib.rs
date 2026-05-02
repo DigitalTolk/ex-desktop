@@ -33,6 +33,20 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // A second instance was launched (e.g. by an ex:// deep link while
+            // the app is already running). Bring the existing window forward and
+            // forward any deep-link URLs so the frontend can handle them.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            for arg in &argv {
+                if arg.starts_with("ex://") {
+                    let _ = app.emit("deep-link", arg.clone());
+                }
+            }
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
