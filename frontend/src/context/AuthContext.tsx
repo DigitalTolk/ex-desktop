@@ -83,18 +83,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(() => {
+    const base = serverUrl ?? getBaseUrl();
     if (IS_TAURI) {
-      // SSO must navigate directly to the server — NOT through the Vite proxy.
-      // The OIDC provider redirects back to the real server callback URL, so
-      // cookies set via the proxy (bound to localhost:5173) would be missing.
-      // serverUrl is always set by the time login is reachable.
-      const base = serverUrl ?? getBaseUrl();
-      const redirectTo = import.meta.env.DEV
-        ? 'http://localhost:5173/oidc/callback'
-        : 'tauri://localhost/oidc/callback';
-      window.location.href = `${base}/auth/oidc/login?redirect_to=${encodeURIComponent(redirectTo)}`;
+      // Open SSO in the system browser so WebKit is not involved in the OAuth
+      // redirect chain. WebKit rejects HTTP 302 redirects to non-HTTP schemes
+      // (e.g. tauri://) with "Redirection to URL with a scheme that is not
+      // HTTP(S)". Using the system browser avoids this entirely.
+      //
+      // The server redirects to ex://app/oidc/callback?token=... after auth.
+      // The OS delivers this as a deep link, useDeepLink() navigates to
+      // /oidc/callback?token=..., and OIDCCallbackPage completes sign-in.
+      const redirectTo = 'ex://app/oidc/callback';
+      import('@tauri-apps/plugin-opener').then(({ openUrl }) => {
+        openUrl(`${base}/auth/oidc/login?redirect_to=${encodeURIComponent(redirectTo)}`);
+      });
     } else {
-      window.location.href = `${getBaseUrl()}/auth/oidc/login`;
+      window.location.href = `${base}/auth/oidc/login`;
     }
   }, [serverUrl]);
 
