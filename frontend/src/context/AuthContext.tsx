@@ -16,6 +16,7 @@ import {
 } from '@/lib/api';
 import { IS_TAURI, getRefreshToken, deleteRefreshToken } from '@/platform';
 import { useServer } from '@/context/ServerContext';
+import { toast } from 'sonner';
 
 interface AuthState {
   user: User | null;
@@ -95,28 +96,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // that endpoint after auth and we emit 'oauth-token' with the token.
       // More reliable than custom URL schemes: no OS registration needed,
       // works in all browsers, no single-instance complexity.
+      toast.info('[dbg] Starting OAuth server…');
       Promise.all([
         import('@tauri-apps/api/core'),
         import('@tauri-apps/api/event'),
         import('@tauri-apps/plugin-opener'),
       ]).then(async ([{ invoke }, { listen }, { openUrl }]) => {
         const port = await invoke<number>('start_oauth_server');
+        toast.info(`[dbg] Listening on port ${port}`);
         const redirectTo = `http://localhost:${port}/callback`;
 
         const unlisten = await listen<string>('oauth-token', async (event) => {
           unlisten();
           const token = event.payload;
+          toast.info(`[dbg] oauth-token received (${token.length} chars)`);
           setAccessToken(token);
           try {
             const user = await apiFetch<User>('/api/v1/users/me');
             setAuth(token, user);
-          } catch {
-            // token arrived but /users/me failed — stay on login
+          } catch (e) {
+            toast.error(`[dbg] /users/me failed: ${e}`);
           }
         });
 
         openUrl(`${base}/auth/oidc/login?redirect_to=${encodeURIComponent(redirectTo)}`);
-      });
+      }).catch((e) => toast.error(`[dbg] login setup failed: ${e}`));
     } else {
       window.location.href = `${base}/auth/oidc/login`;
     }
