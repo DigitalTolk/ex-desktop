@@ -34,17 +34,29 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // A second instance was launched (e.g. by an ex:// deep link while
-            // the app is already running). Bring the existing window forward and
-            // forward any deep-link URLs so the frontend can handle them.
+            // A second instance was launched (e.g. by an ex:// deep link).
+            // Bring the existing window forward; the deep-link plugin fires
+            // on_open_url after single-instance forwards the args, which then
+            // emits the 'deep-link' event to the frontend.
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.set_focus();
             }
-            for arg in &argv {
-                if arg.starts_with("ex://") {
-                    let _ = app.emit("deep-link", arg.clone());
-                }
+            // Belt-and-suspenders: also emit directly in case the deep-link
+            // plugin's on_open_url doesn't fire (plugin init order race).
+            let handle = app.clone();
+            let urls: Vec<String> = argv.into_iter()
+                .filter(|a| a.starts_with("ex://"))
+                .collect();
+            if !urls.is_empty() {
+                tauri::async_runtime::spawn(async move {
+                    // Small delay so the window is fully visible before the
+                    // frontend processes the navigation event.
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    for url in urls {
+                        let _ = handle.emit("deep-link", url);
+                    }
+                });
             }
         }))
         .plugin(tauri_plugin_deep_link::init())

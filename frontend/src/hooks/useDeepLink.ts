@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { IS_TAURI } from '@/platform';
 
 /**
- * Listens for ex:// deep-link events emitted by the Tauri backend and
- * navigates to the corresponding in-app route.
+ * Listens for ex:// deep-link events and navigates to the in-app route.
  *
  * URL format:  ex://<host>/<path>
  * Examples:
@@ -18,21 +17,41 @@ export function useDeepLink() {
   useEffect(() => {
     if (!IS_TAURI) return;
 
-    let unlisten: (() => void) | undefined;
+    function handleUrl(rawUrl: string) {
+      try {
+        const url = new URL(rawUrl);
+        const path = url.pathname + url.search + url.hash;
+        if (path && path !== '/') navigate(path, { replace: true });
+      } catch {
+        // ignore malformed URLs
+      }
+    }
 
-    import('@tauri-apps/api/event').then(({ listen }) => {
-      listen<string>('deep-link', (event) => {
-        try {
-          const url = new URL(event.payload);
-          // Convert ex://app/some/path?q=1 → /some/path?q=1
-          const path = url.pathname + url.search + url.hash;
-          if (path && path !== '/') navigate(path, { replace: true });
-        } catch {
-          // ignore malformed URLs
-        }
-      }).then((fn) => { unlisten = fn; });
+    let cleanupPlugin: (() => void) | undefined;
+    let cleanupFallback: (() => void) | undefined;
+
+    // Primary: use the official plugin JS API so we receive URLs delivered
+    // via both cold-launch args and the single-instance forwarding mechanism.
+    import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl }) => {
+      onOpenUrl((urls) => {
+        for (const url of urls) handleUrl(url);
+      }).then((unlisten) => { cleanupPlugin = unlisten; });
+    }).catch(() => {
+      // Plugin JS not available (shouldn't happen in production).
     });
 
-    return () => { unlisten?.(); };
+    // Fallback: our custom Rust backend also emits a 'deep-link' event from
+    // the single-instance callback and on_open_url handler. Handle both so
+    // either mechanism is sufficient.
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen<string>('deep-link', (event) => {
+        handleUrl(event.payload);
+      }).then((unlisten) => { cleanupFallback = unlisten; });
+    });
+
+    return () => {
+      cleanupPlugin?.();
+      cleanupFallback?.();
+    };
   }, [navigate]);
 }
