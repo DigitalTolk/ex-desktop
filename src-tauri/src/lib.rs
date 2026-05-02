@@ -50,11 +50,16 @@ pub fn run() {
                 .collect();
             if !urls.is_empty() {
                 tauri::async_runtime::spawn(async move {
-                    // Small delay so the window is fully visible before the
-                    // frontend processes the navigation event.
-                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                    for url in urls {
-                        let _ = handle.emit("deep-link", url);
+                    // Emit twice: once after a short delay (window focus) and
+                    // once after a longer delay (React may still be loading if
+                    // this is a fresh instance launched by the OS for the link).
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    for url in &urls {
+                        let _ = handle.emit("deep-link", url.clone());
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    for url in &urls {
+                        let _ = handle.emit("deep-link", url.clone());
                     }
                 });
             }
