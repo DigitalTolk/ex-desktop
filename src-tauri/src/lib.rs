@@ -1,11 +1,12 @@
 mod commands;
+mod config;
 
+use tauri::webview::WebviewWindowBuilder;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WindowEvent,
 };
-use tauri::webview::WebviewWindowBuilder;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 fn focus_primary_window(app: &tauri::AppHandle) {
@@ -54,9 +55,7 @@ pub fn run() {
     // SAFETY: called before any threads are spawned by Tauri or WebKit.
     #[cfg(target_os = "linux")]
     unsafe {
-        if std::env::var("WAYLAND_DISPLAY").is_ok()
-            && std::env::var("GDK_BACKEND").is_err()
-        {
+        if std::env::var("WAYLAND_DISPLAY").is_ok() && std::env::var("GDK_BACKEND").is_err() {
             std::env::set_var("GDK_BACKEND", "x11");
         }
         if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
@@ -73,7 +72,8 @@ pub fn run() {
             // Belt-and-suspenders: also emit directly in case the deep-link
             // plugin's on_open_url doesn't fire (plugin init order race).
             let handle = app.clone();
-            let urls: Vec<String> = argv.into_iter()
+            let urls: Vec<String> = argv
+                .into_iter()
                 .filter(|a| a.starts_with("ex://"))
                 .collect();
             if !urls.is_empty() {
@@ -109,14 +109,20 @@ pub fn run() {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
             let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
             let handle = app.handle().clone();
-            if let Err(e) = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
-                focus_primary_window(&handle);
-            }) {
-                log::warn!("Could not register global shortcut Ctrl+Shift+E (already in use by OS?): {e}");
+            if let Err(e) =
+                app.global_shortcut()
+                    .on_shortcut(shortcut, move |_app, _shortcut, _event| {
+                        focus_primary_window(&handle);
+                    })
+            {
+                log::warn!(
+                    "Could not register global shortcut Ctrl+Shift+E (already in use by OS?): {e}"
+                );
             }
 
             let open_i = MenuItem::with_id(app, "open", "Open ex", true, None::<&str>)?;
-            let change_server_i = MenuItem::with_id(app, "change-server", "Change server", true, None::<&str>)?;
+            let change_server_i =
+                MenuItem::with_id(app, "change-server", "Change server", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_i, &change_server_i, &sep, &quit_i])?;
@@ -183,13 +189,14 @@ pub fn run() {
                 });
             }
 
-            if let Some(server_url) = commands::configured_server_url(&app.handle()) {
-                if let Err(err) = commands::open_or_navigate_main_window(&app.handle(), &server_url) {
+            if let Some(server_url) = commands::configured_server_url(app.handle()) {
+                if let Err(err) = commands::open_or_navigate_main_window(app.handle(), &server_url)
+                {
                     log::warn!("Could not open configured server URL: {err}");
-                    open_setup_window(&app.handle())?;
+                    open_setup_window(app.handle())?;
                 }
             } else {
-                open_setup_window(&app.handle())?;
+                open_setup_window(app.handle())?;
             }
 
             // Register the ex:// URL scheme with the OS.
@@ -198,12 +205,13 @@ pub fn run() {
             // Handle ex:// deep links — bring the window forward and forward
             // the URL to the frontend so it can navigate.
             let handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event: tauri_plugin_deep_link::OpenUrlEvent| {
-                focus_primary_window(&handle);
-                for url in event.urls() {
-                    let _ = handle.emit("deep-link", url.to_string());
-                }
-            });
+            app.deep_link()
+                .on_open_url(move |event: tauri_plugin_deep_link::OpenUrlEvent| {
+                    focus_primary_window(&handle);
+                    for url in event.urls() {
+                        let _ = handle.emit("deep-link", url.to_string());
+                    }
+                });
 
             Ok(())
         })
