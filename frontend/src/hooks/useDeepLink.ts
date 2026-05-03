@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IS_TAURI } from '@/platform';
-import { toast } from 'sonner';
 
 export function useDeepLink() {
   const navigate = useNavigate();
@@ -9,14 +8,13 @@ export function useDeepLink() {
   useEffect(() => {
     if (!IS_TAURI) return;
 
-    function handleUrl(rawUrl: string, source: string) {
-      toast.info(`[dbg] deep-link(${source}): ${rawUrl.slice(0, 80)}`);
+    function handleUrl(rawUrl: string) {
       try {
         const url = new URL(rawUrl);
         const path = url.pathname + url.search + url.hash;
         if (path && path !== '/') navigate(path, { replace: true });
       } catch {
-        toast.error(`[dbg] bad URL: ${rawUrl.slice(0, 40)}`);
+        // ignore malformed URLs
       }
     }
 
@@ -24,22 +22,14 @@ export function useDeepLink() {
     let cleanupFallback: (() => void) | undefined;
 
     import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl, getCurrent }) => {
-      // Check if the app was launched via deep link (cold-start or new instance).
       getCurrent().then((urls) => {
-        if (urls) {
-          toast.info(`[dbg] getCurrent: ${JSON.stringify(urls).slice(0, 80)}`);
-          for (const url of urls) handleUrl(url, 'getCurrent');
-        } else {
-          toast.info('[dbg] getCurrent: null');
-        }
-      }).catch((e) => toast.error(`[dbg] getCurrent error: ${e}`));
+        if (urls) for (const url of urls) handleUrl(url);
+      }).catch(() => {});
 
-      // Listen for future deep links (single-instance forwarding on Linux/Windows,
-      // NSAppleEvent on macOS).
       onOpenUrl((urls) => {
-        for (const url of urls) handleUrl(url, 'onOpenUrl');
+        for (const url of urls) handleUrl(url);
       }).then((unlisten) => { cleanupPlugin = unlisten; });
-    }).catch((e) => toast.error(`[dbg] plugin import error: ${e}`));
+    }).catch(() => {});
 
     // Fallback: custom Rust event emitted from single-instance callback
     // and on_open_url handler.
