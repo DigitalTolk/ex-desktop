@@ -3,7 +3,7 @@ mod config;
 
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WindowEvent,
 };
@@ -20,6 +20,35 @@ fn focus_primary_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn show_change_server(app: &tauri::AppHandle) {
+    if let Err(e) = open_setup_window(app) {
+        log::warn!("Could not open setup window: {e}");
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn configure_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let app_menu = Menu::default(app)?;
+    let switch_chat_url_i = MenuItem::with_id(
+        app,
+        "switch-chat-url",
+        "Switch Chat URL...",
+        true,
+        None::<&str>,
+    )?;
+    let reload_i = MenuItem::with_id(app, "reload-chat", "Reload Chat", true, Some("CmdOrCtrl+R"))?;
+    let sep = PredefinedMenuItem::separator(app)?;
+
+    if let Some(MenuItemKind::Submenu(first_menu)) = app_menu.items()?.into_iter().next() {
+        first_menu.prepend_items(&[&switch_chat_url_i, &reload_i, &sep])?;
+    }
+
+    app.set_menu(app_menu)?;
+    Ok(())
 }
 
 pub(crate) fn open_setup_window(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -120,9 +149,16 @@ pub fn run() {
                 );
             }
 
+            configure_app_menu(app.handle())?;
+
             let open_i = MenuItem::with_id(app, "open", "Open ex", true, None::<&str>)?;
-            let change_server_i =
-                MenuItem::with_id(app, "change-server", "Change server", true, None::<&str>)?;
+            let change_server_i = MenuItem::with_id(
+                app,
+                "change-server",
+                "Switch Chat URL...",
+                true,
+                None::<&str>,
+            )?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_i, &change_server_i, &sep, &quit_i])?;
@@ -140,9 +176,7 @@ pub fn run() {
                         focus_primary_window(app);
                     }
                     "change-server" => {
-                        if let Err(e) = open_setup_window(app) {
-                            log::warn!("Could not open setup window: {e}");
-                        }
+                        show_change_server(app);
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -176,6 +210,16 @@ pub fn run() {
 
             // Keep the tray alive for the app's lifetime.
             app.manage(tray);
+
+            app.on_menu_event(|app, event| match event.id.as_ref() {
+                "switch-chat-url" => show_change_server(app),
+                "reload-chat" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.eval("globalThis.location.reload()");
+                    }
+                }
+                _ => {}
+            });
 
             // Check for app updates in the background after a short delay.
             #[cfg(not(debug_assertions))]
@@ -234,8 +278,7 @@ pub fn run() {
             commands::save_server_url_and_load,
             commands::clear_server_url,
             commands::show_setup_window,
-            commands::get_refresh_token,
-            commands::delete_refresh_token,
+            commands::start_relogin,
             commands::set_badge_count,
         ])
         .run(tauri::generate_context!())

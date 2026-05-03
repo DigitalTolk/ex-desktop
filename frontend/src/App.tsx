@@ -176,7 +176,7 @@ export default function App() {
               </p>
             )}
           <p className="mt-6 text-sm text-slate-500">
-            You can change the server later from the tray menu.
+            You can change the server later from the ex menu or tray menu.
           </p>
         </section>
       </div>
