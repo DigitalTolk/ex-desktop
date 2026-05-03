@@ -16,7 +16,6 @@ import {
 } from '@/lib/api';
 import { IS_TAURI, getRefreshToken, deleteRefreshToken } from '@/platform';
 import { useServer } from '@/context/ServerContext';
-import { toast } from 'sonner';
 
 interface AuthState {
   user: User | null;
@@ -96,39 +95,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // that endpoint after auth and we emit 'oauth-token' with the token.
       // More reliable than custom URL schemes: no OS registration needed,
       // works in all browsers, no single-instance complexity.
-      toast.info('[dbg] Starting OAuth server…');
       Promise.all([
         import('@tauri-apps/api/core'),
         import('@tauri-apps/api/event'),
         import('@tauri-apps/plugin-opener'),
       ]).then(async ([{ invoke }, { listen }, { openUrl }]) => {
-        const port = await invoke<number>('start_oauth_server');
-        toast.info(`[dbg] Listening on port ${port}`);
+        const port = await invoke<number>('start_oauth_server', { serverUrl: base });
         const redirectTo = `http://localhost:${port}/callback`;
 
-        const unlisten = await listen<string>('oauth-token', async (event) => {
+        const unlisten = await listen<{ token: string; user: User }>('oauth-complete', (event) => {
           unlisten();
-          const token = event.payload;
-          toast.info(`[dbg] oauth-token received (${token.length} chars)`);
-          setAccessToken(token);
-          try {
-            // Use `base` explicitly — apiFetch relies on a module-level baseUrl
-            // that may not be set yet on first launch (macOS: "Load failed").
-            const res = await fetch(`${base}/api/v1/users/me`, {
-              headers: { Authorization: `Bearer ${token}` },
-              credentials: 'include',
-            });
-            toast.info(`[dbg] /users/me status: ${res.status}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-            const user = await res.json() as User;
-            setAuth(token, user);
-          } catch (e) {
-            toast.error(`[dbg] /users/me failed: ${e}`);
-          }
+          const { token, user } = event.payload;
+          setAuth(token, user);
         });
 
         openUrl(`${base}/auth/oidc/login?redirect_to=${encodeURIComponent(redirectTo)}`);
-      }).catch((e) => toast.error(`[dbg] login setup failed: ${e}`));
+      }).catch(console.error);
     } else {
       window.location.href = `${base}/auth/oidc/login`;
     }

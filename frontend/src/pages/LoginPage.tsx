@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,7 @@ export default function LoginPage() {
   const { token: inviteToken } = useParams<{ token: string }>();
   useDocumentTitle(inviteToken ? 'Accept invite' : 'Sign in');
   const navigate = useNavigate();
-  const { login, setAuth } = useAuth();
+  const { login, setAuth, isAuthenticated } = useAuth();
   const { serverUrl, clearServer } = useServer();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +24,9 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isInviteMode = !!inviteToken;
+  useEffect(() => {
+    if (isAuthenticated) navigate(`/channel/${GENERAL_CHANNEL_SLUG}`, { replace: true });
+  }, [isAuthenticated, navigate]);
 
   async function handleGuestLogin(e: React.FormEvent) {
     e.preventDefault();

@@ -47,6 +47,7 @@ serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 log        = "0.4"
 tokio      = { version = "1", features = ["full", "time"] }
+reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-opener = "2"

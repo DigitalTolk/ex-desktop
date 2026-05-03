@@ -76,11 +76,19 @@ pub fn delete_refresh_token() -> Result<(), String> {
     }
 }
 
+/// Payload emitted when OAuth completes successfully.
+#[derive(serde::Serialize, Clone)]
+pub struct OAuthComplete {
+    pub token: String,
+    pub user: serde_json::Value,
+}
+
 /// Starts a one-shot local HTTP server for the OAuth redirect callback.
-/// Returns the port. When the browser hits /callback?token=..., the command
-/// emits an `oauth-token` event with the token and responds with a success page.
+/// Returns the port. When the browser hits /callback?token=..., the server
+/// fetches /api/v1/users/me from `server_url` (bypassing browser CORS), then
+/// emits `oauth-complete` with { token, user } and responds with a success page.
 #[tauri::command]
-pub async fn start_oauth_server(app: AppHandle) -> Result<u16, String> {
+pub async fn start_oauth_server(app: AppHandle, server_url: String) -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|e| e.to_string())?;
@@ -105,12 +113,39 @@ pub async fn start_oauth_server(app: AppHandle) -> Result<u16, String> {
                     })
                 });
 
-            let html = if token.is_some() {
+            let result: Option<OAuthComplete> = if let Some(ref t) = token {
+                let me_url = format!("{}/api/v1/users/me", server_url.trim_end_matches('/'));
+                match reqwest::Client::new()
+                    .get(&me_url)
+                    .bearer_auth(t)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        resp.json::<serde_json::Value>().await.ok().map(|user| OAuthComplete {
+                            token: t.clone(),
+                            user,
+                        })
+                    }
+                    Ok(resp) => {
+                        log::warn!("start_oauth_server: /users/me returned {}", resp.status());
+                        None
+                    }
+                    Err(e) => {
+                        log::warn!("start_oauth_server: /users/me request failed: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            let html = if result.is_some() {
                 "<html><head><title>Signed in</title></head><body>\
                  <h2>Sign-in successful — you can close this tab.</h2>\
                  <script>window.close()</script></body></html>"
             } else {
-                "<html><body><h2>Sign-in failed — no token received.</h2></body></html>"
+                "<html><body><h2>Sign-in failed — please try again.</h2></body></html>"
             };
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -120,8 +155,8 @@ pub async fn start_oauth_server(app: AppHandle) -> Result<u16, String> {
             let _ = stream.write_all(response.as_bytes()).await;
             let _ = stream.flush().await;
 
-            if let Some(t) = token {
-                let _ = app.emit("oauth-token", t);
+            if let Some(payload) = result {
+                let _ = app.emit("oauth-complete", payload);
             }
         }
     });
