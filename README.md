@@ -1,5 +1,8 @@
 # ex Desktop
 
+[![CI](https://github.com/DigitalTolk/ex-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/DigitalTolk/ex-desktop/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/DigitalTolk/ex-desktop/badge.svg?branch=main)](https://coveralls.io/github/DigitalTolk/ex-desktop?branch=main)
+
 Native desktop wrapper for [ex](https://github.com/DigitalTolk/ex) — a self-hosted team chat application.
 
 Built with **Tauri v2** (Rust) and a small local bootstrap UI. The desktop app stores a workspace URL, then loads the server-hosted ex web interface inside the main webview.
