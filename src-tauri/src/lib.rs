@@ -3,9 +3,46 @@ mod commands;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Emitter, Manager, WebviewUrl, WindowEvent,
 };
+use tauri::webview::WebviewWindowBuilder;
 use tauri_plugin_deep_link::DeepLinkExt;
+
+fn focus_primary_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window("setup") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+pub(crate) fn open_setup_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("setup") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
+        .title("Configure ex")
+        .inner_size(540.0, 720.0)
+        .min_inner_size(420.0, 620.0)
+        .resizable(true)
+        .build()?;
+
+    if let Some(icon) = app.default_window_icon() {
+        let _ = window.set_icon(icon.clone());
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,18 +67,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // A second instance was launched (e.g. by an ex:// deep link).
-            // Bring the existing window forward; the deep-link plugin fires
-            // on_open_url after single-instance forwards the args, which then
-            // emits the 'deep-link' event to the frontend.
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            focus_primary_window(app);
             // Belt-and-suspenders: also emit directly in case the deep-link
             // plugin's on_open_url doesn't fire (plugin init order race).
             let handle = app.clone();
@@ -65,13 +93,9 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_opener::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -86,22 +110,16 @@ pub fn run() {
             let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyE);
             let handle = app.handle().clone();
             if let Err(e) = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
-                if let Some(w) = handle.get_webview_window("main") {
-                    if w.is_visible().unwrap_or(false) {
-                        let _ = w.set_focus();
-                    } else {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
-                }
+                focus_primary_window(&handle);
             }) {
                 log::warn!("Could not register global shortcut Ctrl+Shift+E (already in use by OS?): {e}");
             }
 
             let open_i = MenuItem::with_id(app, "open", "Open ex", true, None::<&str>)?;
+            let change_server_i = MenuItem::with_id(app, "change-server", "Change server", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;
+            let menu = Menu::with_items(app, &[&open_i, &change_server_i, &sep, &quit_i])?;
 
             let tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -110,9 +128,11 @@ pub fn run() {
                 .tooltip("ex")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
+                        focus_primary_window(app);
+                    }
+                    "change-server" => {
+                        if let Err(e) = open_setup_window(app) {
+                            log::warn!("Could not open setup window: {e}");
                         }
                     }
                     "quit" => app.exit(0),
@@ -127,6 +147,13 @@ pub fn run() {
                     {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        } else if let Some(w) = app.get_webview_window("setup") {
                             if w.is_visible().unwrap_or(false) {
                                 let _ = w.hide();
                             } else {
@@ -156,11 +183,13 @@ pub fn run() {
                 });
             }
 
-            // Set the window icon explicitly (needed for Linux taskbar/switcher in dev mode).
-            if let Some(w) = app.get_webview_window("main") {
-                if let Some(icon) = app.default_window_icon() {
-                    let _ = w.set_icon(icon.clone());
+            if let Some(server_url) = commands::configured_server_url(&app.handle()) {
+                if let Err(err) = commands::open_or_navigate_main_window(&app.handle(), &server_url) {
+                    log::warn!("Could not open configured server URL: {err}");
+                    open_setup_window(&app.handle())?;
                 }
+            } else {
+                open_setup_window(&app.handle())?;
             }
 
             // Register the ex:// URL scheme with the OS.
@@ -170,10 +199,7 @@ pub fn run() {
             // the URL to the frontend so it can navigate.
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event: tauri_plugin_deep_link::OpenUrlEvent| {
-                if let Some(w) = handle.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
+                focus_primary_window(&handle);
                 for url in event.urls() {
                     let _ = handle.emit("deep-link", url.to_string());
                 }
@@ -184,22 +210,22 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Hide to tray instead of closing when user presses X.
             // Quit is available from the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::greet,
             commands::get_server_url,
             commands::set_server_url,
-            commands::get_autostart,
-            commands::set_autostart,
-            commands::set_badge_count,
+            commands::save_server_url_and_load,
+            commands::clear_server_url,
+            commands::show_setup_window,
             commands::get_refresh_token,
-            commands::set_refresh_token,
             commands::delete_refresh_token,
-            commands::start_oauth_server,
+            commands::set_badge_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ex desktop");

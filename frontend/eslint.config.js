@@ -27,18 +27,6 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/components/ui/**'],
-    rules: {
-      'react-refresh/only-export-components': 'off',
-    },
-  },
-  {
-    files: ['src/context/**'],
-    rules: {
-      'react-refresh/only-export-components': 'off',
-    },
-  },
-  {
     ignores: ['dist/**', 'node_modules/**', 'components.json'],
   },
 ]);

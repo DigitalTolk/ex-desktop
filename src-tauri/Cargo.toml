@@ -18,36 +18,26 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri             = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-log  = "2"
-
-# Phase 1 — auth & secure token storage
 keyring           = "3"
 
-# Phase 2 — native notifications
-tauri-plugin-notification = "2"
-
-# Phase 4 — server config persistence
+# Server config persistence
 tauri-plugin-store = "2"
 
-# Phase 5 — auto-updater
+# Auto-updater
 tauri-plugin-updater = "2"
 
-# Phase 6 — file handling
-tauri-plugin-dialog = "2"
-tauri-plugin-fs     = "2"
-
-# Phase 7 — window state (remember size/position)
+# Window state (remember size/position)
 tauri-plugin-window-state = "2"
 
-# Phase 8 — deep links (OIDC callback) + single-instance enforcement
+# Deep links + single-instance enforcement
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
 
 # Utilities
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 log        = "0.4"
 tokio      = { version = "1", features = ["full", "time"] }
-reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
-tauri-plugin-opener = "2"
+url = "2"

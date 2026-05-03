@@ -1,164 +1,173 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { AuthProvider, useAuth } from '@/context/AuthContext';
-import { ServerProvider, useServer } from '@/context/ServerContext';
-import { UnreadProvider } from '@/context/UnreadContext';
-import { PresenceProvider } from '@/context/PresenceContext';
-import { NotificationProvider } from '@/context/NotificationContext';
-import { TypingProvider } from '@/context/TypingContext';
-import { ThemeProvider } from '@/context/ThemeContext';
-import { UpdateBanner } from '@/components/UpdateBanner';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { Toaster } from '@/components/ui/sonner';
-import LoginPage from '@/pages/LoginPage';
-import OIDCCallbackPage from '@/pages/OIDCCallbackPage';
-import ChatPage from '@/pages/ChatPage';
-import SetupPage from '@/pages/SetupPage';
-import { ChannelView } from '@/components/chat/ChannelView';
-import { ConversationView } from '@/components/chat/ConversationView';
-import DirectoriesPage from '@/pages/DirectoriesPage';
-import AdminPage from '@/pages/AdminPage';
-import NewConversationPage from '@/pages/NewConversationPage';
-import ThreadsPage from '@/pages/ThreadsPage';
-import { IS_TAURI } from '@/platform';
-import { useDeepLink } from '@/hooks/useDeepLink';
-import { useEffect } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
+import {
+  IS_TAURI,
+  clearServerUrl,
+  getServerUrl,
+  saveServerUrlAndLoad,
+} from '@/platform';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-    },
-  },
-});
-
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
-}
-
-function useExternalLinks() {
-  useEffect(() => {
-    if (!IS_TAURI) return;
-    async function handleClick(e: MouseEvent) {
-      const a = (e.target as Element).closest('a[href]') as HTMLAnchorElement | null;
-      if (!a) return;
-      const href = a.href;
-      if (href.startsWith('http://') || href.startsWith('https://')) {
-        e.preventDefault();
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
-        openUrl(href).catch(console.error);
-      }
-    }
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, []);
-}
-
-function AppRoutes() {
-  useDeepLink();
-  useExternalLinks();
-  return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/invite/:token" element={<LoginPage />} />
-      <Route path="/oidc/callback" element={<OIDCCallbackPage />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <ChatPage />
-          </ProtectedRoute>
-        }
-      >
-        <Route
-          index
-          element={
-            <div className="flex flex-1 items-center justify-center text-muted-foreground">
-              Select a channel or conversation to start chatting
-            </div>
-          }
-        />
-        <Route path="directory" element={<DirectoriesPage />} />
-        <Route path="threads" element={<ThreadsPage />} />
-        <Route path="admin" element={<AdminPage />} />
-        <Route path="channel/:id" element={<ChannelView />} />
-        <Route path="conversations/new" element={<NewConversationPage />} />
-        <Route path="conversation/:id" element={<ConversationView />} />
-      </Route>
-    </Routes>
-  );
-}
-
-function ServerGate({ children }: { children: ReactNode }) {
-  const { serverUrl, isLoading } = useServer();
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    );
-  }
-
-  if (IS_TAURI && serverUrl === null) {
-    return <SetupPage />;
-  }
-
-  return <>{children}</>;
+function normalizeServerUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
 }
 
 export default function App() {
+  const [serverUrl, setServerUrl] = useState('');
+  const [storedServerUrl, setStoredServerUrl] = useState('');
+  const [isLoading, setIsLoading] = useState(IS_TAURI);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getServerUrl()
+      .then(async (url) => {
+        if (!active) return;
+        const normalized = normalizeServerUrl(url);
+        setServerUrl(url);
+        setStoredServerUrl(url);
+
+        if (!IS_TAURI || !normalized) {
+          return;
+        }
+
+        const [{ getCurrentWebviewWindow }] = await Promise.all([
+          import('@tauri-apps/api/webviewWindow'),
+        ]);
+        const currentWindow = getCurrentWebviewWindow();
+        if (currentWindow.label === 'main') {
+          window.location.replace(normalized);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setError('Could not read the saved server address.');
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const normalizedUrl = useMemo(() => normalizeServerUrl(serverUrl), [serverUrl]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setStatus('');
+
+    if (!normalizedUrl) {
+      setError('Enter the full workspace URL, including https://');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      if (IS_TAURI) {
+        const savedUrl = await saveServerUrlAndLoad(normalizedUrl);
+        setStoredServerUrl(savedUrl);
+        setStatus('Opening your workspace…');
+      } else {
+        window.location.assign(normalizedUrl);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open that workspace.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleClear() {
+    setError('');
+    setStatus('');
+    setIsSubmitting(true);
+    try {
+      await clearServerUrl();
+      setServerUrl('');
+      setStoredServerUrl('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not clear the saved workspace.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ThemeProvider>
-          <ServerProvider>
-            <ServerGate>
-              <AuthProvider>
-                <UnreadProvider>
-                  <PresenceProvider>
-                    <NotificationProvider>
-                      <TypingProvider>
-                        <TooltipProvider>
-                          {/* h-dvh + flex-col viewport constraint so the
-                              UpdateBanner sits as a normal block above the
-                              app and never has to overlay scrolling content. */}
-                          <div className="flex h-dvh flex-col">
-                            <UpdateBanner />
-                            <div className="min-h-0 flex-1">
-                              <AppRoutes />
-                            </div>
-                          </div>
-                          <Toaster position="top-right" richColors />
-                        </TooltipProvider>
-                      </TypingProvider>
-                    </NotificationProvider>
-                  </PresenceProvider>
-                </UnreadProvider>
-              </AuthProvider>
-            </ServerGate>
-          </ServerProvider>
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
-    </ErrorBoundary>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.16),_transparent_38%),linear-gradient(180deg,_#fcfaf5_0%,_#f4efe4_100%)] text-slate-900">
+      <div className="mx-auto flex min-h-screen w-full max-w-2xl items-center px-6 py-10 sm:px-8">
+        <section className="w-full rounded-[2rem] border border-white/70 bg-white/85 p-8 shadow-[0_30px_80px_rgba(52,36,13,0.12)] backdrop-blur sm:p-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-700">
+            ex Desktop
+          </p>
+          <h1 className="mt-4 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
+            Connect to your server
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+            Enter the full URL for your ex workspace.
+          </p>
+
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+            {storedServerUrl && (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Saved server: <span className="break-all font-medium text-slate-900">{storedServerUrl}</span>
+              </p>
+            )}
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">
+                  Server URL
+                </span>
+                <input
+                  autoFocus
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://chat.yourcompany.com"
+                  value={serverUrl}
+                  onChange={(event) => setServerUrl(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm transition outline-none placeholder:text-slate-400 focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+                  aria-label="Workspace URL"
+                  disabled={isLoading || isSubmitting}
+                />
+              </label>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="submit"
+                  disabled={isLoading || isSubmitting}
+                  className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isSubmitting ? 'Opening workspace…' : 'Open workspace'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  disabled={isLoading || isSubmitting || !storedServerUrl}
+                  className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                >
+                  Clear saved workspace
+                </button>
+              </div>
+            </form>
+
+            {error && (
+              <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
+              </p>
+            )}
+            {status && !error && (
+              <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {status}
+              </p>
+            )}
+          <p className="mt-6 text-sm text-slate-500">
+            You can change the server later from the tray menu.
+          </p>
+        </section>
+      </div>
+    </main>
   );
 }

@@ -1,60 +1,74 @@
-import { isTauri } from '@tauri-apps/api/core';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
 export const IS_TAURI = isTauri();
 
-/**
- * Returns the configured server URL.
- * In browser/dev-proxy mode this is always '' (relative URLs work via Vite proxy).
- * In production Tauri this is whatever the user configured on first launch.
- */
+function asError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string') return new Error(error);
+  return new Error(fallback);
+}
+
 export async function getServerUrl(): Promise<string> {
-    if (!IS_TAURI) return '';
-    try {
-        return (await invoke<string | null>('get_server_url')) ?? '';
-    } catch {
-        return '';
-    }
+  if (!IS_TAURI) return '';
+  try {
+    return (await invoke<string | null>('get_server_url')) ?? '';
+  } catch {
+    return '';
+  }
 }
 
-/** Persists the server URL to the OS app-data store. */
-export async function setServerUrl(url: string): Promise<void> {
-    if (!IS_TAURI) return;
-    await invoke('set_server_url', { url });
+export async function setServerUrl(url: string): Promise<string> {
+  if (!IS_TAURI) return url;
+  try {
+    return await invoke<string>('set_server_url', { url });
+  } catch (error) {
+    throw asError(error, 'Could not save the workspace URL.');
+  }
 }
 
-/** Updates the tray icon badge with the total unread count. */
+export async function saveServerUrlAndLoad(url: string): Promise<string> {
+  if (!IS_TAURI) return url;
+  try {
+    return await invoke<string>('save_server_url_and_load', { url });
+  } catch (error) {
+    throw asError(error, 'Could not open the workspace.');
+  }
+}
+
+export async function clearServerUrl(): Promise<void> {
+  if (!IS_TAURI) return;
+  try {
+    await invoke('clear_server_url');
+  } catch (error) {
+    throw asError(error, 'Could not clear the workspace URL.');
+  }
+}
+
 export async function setBadgeCount(count: number): Promise<void> {
-    if (!IS_TAURI) return;
-    try { await invoke('set_badge_count', { count }); } catch { /* ignore */ }
+  if (!IS_TAURI) return;
+  try {
+    await invoke('set_badge_count', { count });
+  } catch {
+    // The wrapper app can function without badge updates.
+  }
 }
 
-/** Returns whether launch-at-login is enabled. */
 export async function getAutostart(): Promise<boolean> {
-    if (!IS_TAURI) return false;
-    try { return await invoke<boolean>('get_autostart'); } catch { return false; }
+  return false;
 }
 
-/** Enables or disables launch-at-login. */
-export async function setAutostart(enabled: boolean): Promise<void> {
-    if (!IS_TAURI) return;
-    await invoke('set_autostart', { enabled });
+export async function setAutostart(_enabled: boolean): Promise<void> {
+  return;
 }
 
-/** Reads the refresh token from the OS keychain (Tauri only). */
 export async function getRefreshToken(): Promise<string | null> {
-    if (!IS_TAURI) return null;
-    try { return await invoke<string | null>('get_refresh_token') ?? null; } catch { return null; }
+  return null;
 }
 
-/** Stores the refresh token in the OS keychain (Tauri only). */
-export async function setRefreshToken(token: string): Promise<void> {
-    if (!IS_TAURI) return;
-    try { await invoke('set_refresh_token', { token }); } catch { /* ignore */ }
+export async function setRefreshToken(_token: string): Promise<void> {
+  return;
 }
 
-/** Removes the refresh token from the OS keychain (Tauri only). */
 export async function deleteRefreshToken(): Promise<void> {
-    if (!IS_TAURI) return;
-    try { await invoke('delete_refresh_token'); } catch { /* ignore */ }
+  return;
 }

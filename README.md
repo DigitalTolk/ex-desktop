@@ -1,19 +1,16 @@
 # ex Desktop
 
-Native desktop client for [ex](https://github.com/DigitalTolk/ex) — a self-hosted team chat application.
+Native desktop wrapper for [ex](https://github.com/DigitalTolk/ex) — a self-hosted team chat application.
 
-Built with **Tauri v2** (Rust) and the **ex React frontend**. Runs on macOS, Windows, and Linux from a single codebase.
+Built with **Tauri v2** (Rust) and a small local bootstrap UI. The desktop app stores a workspace URL, then loads the server-hosted ex web interface inside the main webview.
 
 ## Features
 
-- Native OS notifications with channel mute support
-- System tray with unread badge
-- Tokens stored in the OS keychain (not localStorage)
-- OIDC / SSO login via system browser with deep-link callback
-- Auto-updater (silent background updates)
-- Native file picker and drag-and-drop uploads
-- Window state persistence (remembers size and position)
-- Multi-server support (connect to any self-hosted ex instance)
+- Mattermost-style wrapper around the existing ex web UI
+- Local first-run setup screen for selecting a workspace URL
+- Multi-server support (switch between self-hosted ex instances)
+- System tray, global shortcut, auto-updater, and window-state persistence
+- Narrow native bridge by default: the remote server UI is not granted local Tauri permissions
 
 ## Prerequisites
 
@@ -39,11 +36,11 @@ git clone https://github.com/DigitalTolk/ex-desktop.git
 cd ex-desktop
 
 # Install dependencies and launch in dev mode
-# (starts Vite dev server + Tauri window pointing at localhost:8080)
+# (starts the local bootstrap UI + Tauri shell)
 make dev
 ```
 
-On first launch the app will ask for your workspace URL (e.g. `https://chat.yourcompany.com`).
+On first launch the app asks for your workspace URL (for example `https://chat.yourcompany.com`) and then hands the main window off to that server-hosted UI.
 
 ### Available make targets
 
@@ -57,7 +54,7 @@ On first launch the app will ask for your workspace URL (e.g. `https://chat.your
 ### Manual commands
 
 ```bash
-# Frontend only
+# Local bootstrap UI only
 npm --prefix frontend install
 npm --prefix frontend run dev
 
@@ -75,12 +72,12 @@ cargo tauri build
 
 ```
 ex-desktop/
-├── frontend/          React + TypeScript UI (derived from ex/frontend)
+├── frontend/          Local bootstrap/setup UI used before loading the remote server
 ├── src-tauri/
 │   ├── src/
-│   │   ├── lib.rs     App entry point, plugin registration
+│   │   ├── lib.rs     App entry point, tray, startup handoff to remote UI
 │   │   ├── main.rs    Binary entry point
-│   │   └── commands.rs Tauri commands exposed to the frontend
+│   │   └── commands.rs Small local command surface for setup + window handoff
 │   ├── capabilities/
 │   │   └── default.json  Permission declarations
 │   └── tauri.conf.json   App config (identifier, window, bundle)
@@ -99,30 +96,31 @@ ex-desktop/
 
 ### Connecting to the ex server
 
-In dev mode the Vite server proxies `/api` and `/auth` to `http://localhost:8080`. Start the ex server locally with:
+Start the ex server locally with:
 
 ```bash
 # In the ex repository
 docker compose up
 ```
 
-Or set the `VITE_SERVER_URL` environment variable to point to a remote server.
+Then launch `make dev`, enter the server URL into the local setup screen, and the shell will navigate the main webview to that remote UI.
 
-### Adding Tauri commands
+### Local Commands
 
-Commands live in [src-tauri/src/commands.rs](src-tauri/src/commands.rs). Register new commands in the `invoke_handler!` macro in [src-tauri/src/lib.rs](src-tauri/src/lib.rs).
+Commands live in [src-tauri/src/commands.rs](src-tauri/src/commands.rs). They are intentionally limited to local setup tasks such as storing the selected server URL and telling the main window to load it.
 
 ```rust
 #[tauri::command]
-pub fn my_command(arg: String) -> Result<String, String> {
-    Ok(format!("got: {}", arg))
+pub fn save_server_url_and_load(app: AppHandle, url: String) -> Result<String, String> {
+    // validate, persist, and navigate the main window
+    Ok(url)
 }
 ```
 
 Call from TypeScript:
 ```typescript
 import { invoke } from '@tauri-apps/api/core'
-const result = await invoke<string>('my_command', { arg: 'hello' })
+const result = await invoke<string>('save_server_url_and_load', { url: 'https://chat.example.com' })
 ```
 
 ## Releasing

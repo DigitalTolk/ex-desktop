@@ -1,49 +1,59 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-const originalFetch = globalThis.fetch;
+const platform = vi.hoisted(() => ({
+  IS_TAURI: true,
+  clearServerUrl: vi.fn(),
+  getServerUrl: vi.fn(),
+  saveServerUrlAndLoad: vi.fn(),
+}));
 
-vi.mock('@/hooks/useWebSocket', () => ({
-  useWebSocket: vi.fn(),
+vi.mock('@/platform', () => platform);
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({ label: 'setup' }),
 }));
 
 describe('App', () => {
   beforeEach(() => {
-    // AuthProvider calls fetch('/auth/token/refresh') on mount
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({}),
-    } as Response);
+    vi.clearAllMocks();
+    platform.getServerUrl.mockResolvedValue('');
+    platform.saveServerUrlAndLoad.mockResolvedValue('https://chat.example.com');
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it('renders without crashing', async () => {
+  it('renders the wrapper setup flow', async () => {
     render(<App />);
-    // Initially shows Loading... from ProtectedRoute, then redirects to login
-    await vi.waitFor(() => {
-      // After auth finishes loading, unauthenticated user sees login page
-      expect(
-        screen.getByText('Welcome back') || screen.getByText('Loading...'),
-      ).toBeInTheDocument();
+
+    expect(screen.getByText('Connect to your server')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Server URL')).toBeEnabled();
     });
   });
 
-  it('redirects unauthenticated user to login page', async () => {
+  it('saves the server url and opens the remote workspace', async () => {
     render(<App />);
-    await vi.waitFor(() => {
-      expect(screen.getByText('Welcome back')).toBeInTheDocument();
+
+    const input = await screen.findByLabelText('Server URL');
+    fireEvent.change(input, { target: { value: 'https://chat.example.com/' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace' }));
+
+    await waitFor(() => {
+      expect(platform.saveServerUrlAndLoad).toHaveBeenCalledWith('https://chat.example.com');
     });
+    expect(screen.getByText('Opening your workspace…')).toBeInTheDocument();
   });
 
-  it('shows sign in with SSO button on login page', async () => {
+  it('clears the stored workspace', async () => {
+    platform.getServerUrl.mockResolvedValue('https://chat.example.com');
+
     render(<App />);
-    await vi.waitFor(() => {
-      expect(screen.getByLabelText('Sign in with Single Sign-On')).toBeInTheDocument();
+
+    await screen.findByDisplayValue('https://chat.example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved workspace' }));
+
+    await waitFor(() => {
+      expect(platform.clearServerUrl).toHaveBeenCalledTimes(1);
     });
   });
 });
