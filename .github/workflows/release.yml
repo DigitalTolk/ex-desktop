@@ -13,14 +13,29 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
+            args: ''
+            rust_targets: ''
+            asset_name_pattern: ''
           - os: macos-latest
             platform: macos-arm
             args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+            asset_name_pattern: '[name]_[version]_arm64[ext]'
           - os: macos-13
             platform: macos-intel
             args: --target x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+            asset_name_pattern: '[name]_[version]_x64[ext]'
+          - os: macos-latest
+            platform: macos-universal
+            args: --target universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            asset_name_pattern: '[name]_[version]_universal[ext]'
           - os: windows-latest
             platform: windows
+            args: ''
+            rust_targets: ''
+            asset_name_pattern: ''
 
     runs-on: ${{ matrix.os }}
     name: Release (${{ matrix.platform }})
@@ -50,7 +65,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.args != '' && (contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || 'x86_64-apple-darwin') || '' }}
+          targets: ${{ matrix.rust_targets }}
 
       - name: Sync version from tag
         shell: bash
@@ -81,11 +96,13 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: tauri
-          args: ${{ matrix.args }}
+          args: >-
+            ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          releaseAssetNamePattern: ${{ matrix.asset_name_pattern }}
           tagName: ${{ github.ref_name }}
           releaseName: 'ex Desktop ${{ github.ref_name }}'
           releaseBody: 'See CHANGELOG.md for details.'
