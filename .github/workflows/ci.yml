@@ -7,9 +7,66 @@ on:
     branches: [main]
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    name: Lint, test, coverage
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: quality-${{ hashFiles('frontend/src/**') }}
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        run: make lint
+
+      - name: Test and enforce coverage
+        run: make test
+
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          files: frontend/coverage/lcov.info src-tauri/coverage/lcov.info
+          format: lcov
+
   build:
+    needs: quality
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: ubuntu-latest
@@ -58,7 +115,7 @@ jobs:
 
       - name: Install frontend deps
         working-directory: frontend
-        run: npm install
+        run: npm ci
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

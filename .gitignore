@@ -9,6 +9,8 @@ src-tauri/gen/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+src-tauri/coverage/
 
 # Tauri build artifacts
 *.dmg

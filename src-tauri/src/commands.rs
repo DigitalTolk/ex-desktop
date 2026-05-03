@@ -1,15 +1,19 @@
-use keyring::Entry;
-use tauri::{image::Image, webview::PageLoadEvent, AppHandle, Manager, WebviewUrl, WebviewWindow};
+use keyring_core::{Entry, Error as KeyringError};
+use std::sync::Once;
 use tauri::webview::WebviewWindowBuilder;
+use tauri::{image::Image, webview::PageLoadEvent, AppHandle, Manager, WebviewUrl, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 use url::Url;
+
+use crate::config::normalize_server_url;
 
 const KEYRING_SERVICE: &str = "com.digitaltolk.ex";
 const KEYRING_REFRESH_TOKEN: &str = "refresh_token";
 const STORE_FILE: &str = "config.json";
 const KEY_SERVER_URL: &str = "serverUrl";
 
+#[allow(clippy::useless_format)]
 fn remote_main_init_script() -> Result<String, String> {
     Ok(format!(
         r#"
@@ -243,24 +247,6 @@ fn remote_main_init_script() -> Result<String, String> {
     ))
 }
 
-pub(crate) fn normalize_server_url(url: &str) -> Result<String, String> {
-    let trimmed = url.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Err("Server URL is required.".into());
-    }
-
-    let parsed = Url::parse(trimmed).map_err(|_| "Enter a valid http:// or https:// URL.".to_string())?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        _ => return Err("Server URL must start with http:// or https://.".into()),
-    }
-    if parsed.host_str().is_none() {
-        return Err("Server URL must include a hostname.".into());
-    }
-
-    Ok(trimmed.to_string())
-}
-
 pub(crate) fn configured_server_url(app: &AppHandle) -> Option<String> {
     let store = app.store(STORE_FILE).ok()?;
     let url = store
@@ -272,6 +258,11 @@ pub(crate) fn configured_server_url(app: &AppHandle) -> Option<String> {
 }
 
 fn refresh_token_entry() -> Result<Entry, String> {
+    static KEYRING_INIT: Once = Once::new();
+    KEYRING_INIT.call_once(|| {
+        let _ = keyring::use_native_store(false);
+    });
+
     Entry::new(KEYRING_SERVICE, KEYRING_REFRESH_TOKEN).map_err(|e| e.to_string())
 }
 
@@ -279,7 +270,7 @@ fn delete_refresh_token_internal() -> Result<(), String> {
     match refresh_token_entry() {
         Ok(entry) => match entry.delete_credential() {
             Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(KeyringError::NoEntry) => Ok(()),
             Err(err) => Err(err.to_string()),
         },
         Err(err) => Err(err),
@@ -289,7 +280,10 @@ fn delete_refresh_token_internal() -> Result<(), String> {
 fn store_server_url(app: &AppHandle, url: &str) -> Result<String, String> {
     let normalized = normalize_server_url(url)?;
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
-    store.set(KEY_SERVER_URL, serde_json::Value::String(normalized.clone()));
+    store.set(
+        KEY_SERVER_URL,
+        serde_json::Value::String(normalized.clone()),
+    );
     store.save().map_err(|e| e.to_string())?;
     Ok(normalized)
 }
@@ -309,27 +303,23 @@ pub(crate) fn open_or_navigate_main_window(
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
-        app,
-        "main",
-        WebviewUrl::External(parsed),
-    )
-    .on_navigation(move |url| intercept_oidc_navigation(&app_handle, url))
-    .on_page_load({
-        let init_script = init_script.clone();
-        move |webview, payload| {
-            if payload.event() == PageLoadEvent::Finished {
-                let _ = webview.eval(init_script.clone());
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(parsed))
+        .on_navigation(move |url| intercept_oidc_navigation(&app_handle, url))
+        .on_page_load({
+            let init_script = init_script.clone();
+            move |webview, payload| {
+                if payload.event() == PageLoadEvent::Finished {
+                    let _ = webview.eval(init_script.clone());
+                }
             }
-        }
-    })
-    .initialization_script(init_script)
-    .title("ex")
-    .inner_size(1280.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .resizable(true)
-    .build()
-    .map_err(|e| e.to_string())?;
+        })
+        .initialization_script(init_script)
+        .title("ex")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| e.to_string())?;
 
     if let Some(icon) = app.default_window_icon() {
         let _ = window.set_icon(icon.clone());
@@ -501,10 +491,12 @@ pub fn delete_refresh_token() -> Result<(), String> {
 /// Updates the tray icon and tooltip to reflect the unread message count.
 #[tauri::command]
 pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
-    let Some(tray) = app.tray_by_id("main") else { return Ok(()) };
+    let Some(tray) = app.tray_by_id("main") else {
+        return Ok(());
+    };
     if count > 0 {
-        let icon = Image::from_bytes(include_bytes!("../icons/badge.png"))
-            .map_err(|e| e.to_string())?;
+        let icon =
+            Image::from_bytes(include_bytes!("../icons/badge.png")).map_err(|e| e.to_string())?;
         tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
         tray.set_tooltip(Some(&format!(
             "ex — {} unread message{}",
@@ -513,8 +505,8 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
         )))
         .map_err(|e| e.to_string())?;
     } else {
-        let icon = Image::from_bytes(include_bytes!("../icons/icon.png"))
-            .map_err(|e| e.to_string())?;
+        let icon =
+            Image::from_bytes(include_bytes!("../icons/icon.png")).map_err(|e| e.to_string())?;
         tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
         tray.set_tooltip(Some("ex")).map_err(|e| e.to_string())?;
     }
