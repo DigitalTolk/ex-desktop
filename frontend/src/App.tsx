@@ -65,14 +65,27 @@ export default function App() {
       return;
     }
 
+    let safeUrl: string;
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        setError('Enter a valid http(s) workspace URL.');
+        return;
+      }
+      safeUrl = parsedUrl.toString();
+    } catch {
+      setError('Enter a valid workspace URL, including https://');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       if (IS_TAURI) {
-        const savedUrl = await saveServerUrlAndLoad(normalizedUrl);
+        const savedUrl = await saveServerUrlAndLoad(safeUrl);
         setStoredServerUrl(savedUrl);
         setStatus('Opening your workspace…');
       } else {
-        window.location.assign(normalizedUrl);
+        window.location.assign(safeUrl);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not open that workspace.');
