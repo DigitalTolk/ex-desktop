@@ -495,9 +495,10 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
         return Ok(());
     };
     if count > 0 {
-        let icon =
-            Image::from_bytes(include_bytes!("../icons/badge.png")).map_err(|e| e.to_string())?;
-        tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
+        let icon = Image::from_bytes(include_bytes!("../icons/tray-badge-template.png"))
+            .map_err(|e| e.to_string())?;
+        tray.set_icon_with_as_template(Some(icon), true)
+            .map_err(|e| e.to_string())?;
         tray.set_tooltip(Some(&format!(
             "ex — {} unread message{}",
             count,
@@ -505,9 +506,10 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
         )))
         .map_err(|e| e.to_string())?;
     } else {
-        let icon =
-            Image::from_bytes(include_bytes!("../icons/icon.png")).map_err(|e| e.to_string())?;
-        tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
+        let icon = Image::from_bytes(include_bytes!("../icons/tray-template.png"))
+            .map_err(|e| e.to_string())?;
+        tray.set_icon_with_as_template(Some(icon), true)
+            .map_err(|e| e.to_string())?;
         tray.set_tooltip(Some("ex")).map_err(|e| e.to_string())?;
     }
     Ok(())
