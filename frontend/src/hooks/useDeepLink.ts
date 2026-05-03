@@ -35,7 +35,7 @@ export function useDeepLink() {
     // and on_open_url handler.
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen<string>('deep-link', (event) => {
-        handleUrl(event.payload, 'rustEvent');
+        handleUrl(event.payload);
       }).then((unlisten) => { cleanupFallback = unlisten; });
     });
 
