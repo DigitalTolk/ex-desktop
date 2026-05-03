@@ -1,5 +1,6 @@
 # Internal development docs (not shipped to consumers)
 docs/
+/AGENTS.md
 
 # Rust / Cargo
 target/
