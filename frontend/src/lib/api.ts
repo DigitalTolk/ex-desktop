@@ -1,12 +1,28 @@
 let accessToken: string | null = null;
-let baseUrl = '';
+
+// Seeded from localStorage on module load so getBaseUrl() is never empty
+// even before ServerContext's async getServerUrl() resolves. ServerContext
+// keeps this in sync via setBaseUrl whenever the configured URL changes.
+// Skipped in Vite dev mode so the dev proxy continues to work.
+const LS_KEY = 'ex_server_url';
+let baseUrl = import.meta.env.DEV ? '' : (localStorage.getItem(LS_KEY) ?? '');
 
 export function setBaseUrl(url: string) {
   baseUrl = url.replace(/\/$/, '');
+  try { localStorage.setItem(LS_KEY, baseUrl); } catch { /* ignore */ }
 }
 
 export function getBaseUrl(): string {
   return baseUrl;
+}
+
+/** Resolves a server-relative URL (e.g. /api/v1/media/…) against the
+ *  configured base URL so <img> tags work in Tauri where the page origin
+ *  is tauri://localhost rather than the API server. Absolute URLs pass through unchanged. */
+export function resolveMediaUrl(url: string | undefined | null): string {
+  if (!url) return '';
+  if (url.startsWith('/')) return `${baseUrl}${url}`;
+  return url;
 }
 
 export function setAccessToken(token: string) {

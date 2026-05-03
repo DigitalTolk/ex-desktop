@@ -47,6 +47,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     await setServerUrl('');
     setServerUrlState(null);
     setBaseUrl('');
+    try { localStorage.removeItem('ex_server_url'); } catch { /* ignore */ }
   }, []);
 
   return (

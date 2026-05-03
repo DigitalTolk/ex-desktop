@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, resolveMediaUrl } from '@/lib/api';
 import { useAttachmentsBatch } from '@/hooks/useAttachments';
 import { formatBytes, formatRelative } from '@/lib/format';
 import { SidePanel } from './SidePanel';
@@ -66,7 +66,7 @@ export function FilesPanel({ channelId, conversationId, onClose, userMap }: File
               >
                 {a?.url && a.contentType.startsWith('image/') ? (
                   <img
-                    src={a.url}
+                    src={resolveMediaUrl(a.url)}
                     alt=""
                     className="h-12 w-12 rounded-md border object-cover"
                     loading="lazy"
@@ -87,7 +87,7 @@ export function FilesPanel({ channelId, conversationId, onClose, userMap }: File
                 </div>
                 {a?.url && (
                   <a
-                    href={a.url}
+                    href={resolveMediaUrl(a.url)}
                     download={a.filename}
                     className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                     aria-label={`Download ${a.filename}`}

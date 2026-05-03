@@ -2,6 +2,7 @@ import { File as FileIcon, Download } from 'lucide-react';
 import { useAttachmentsBatch } from '@/hooks/useAttachments';
 import { isImageContentType } from '@/lib/file-helpers';
 import { formatBytes } from '@/lib/format';
+import { resolveMediaUrl } from '@/lib/api';
 import type { Attachment } from '@/types';
 
 interface MessageAttachmentsProps {
@@ -39,22 +40,23 @@ function AttachmentSkeleton({ loading }: { loading: boolean }) {
 
 function AttachmentBox({ att }: { att: Attachment }) {
   if (isImageContentType(att.contentType) && att.url) {
+    const resolvedUrl = resolveMediaUrl(att.url);
     return (
       <a
-        href={att.url}
+        href={resolvedUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="block overflow-hidden rounded-md border max-w-xs hover:opacity-90"
         aria-label={`Open image ${att.filename}`}
       >
-        <img src={att.url} alt={att.filename} className="max-h-72 max-w-full" loading="lazy" />
+        <img src={resolvedUrl} alt={att.filename} className="max-h-72 max-w-full" loading="lazy" />
       </a>
     );
   }
 
   return (
     <a
-      href={att.url || '#'}
+      href={resolveMediaUrl(att.url) || '#'}
       target="_blank"
       rel="noopener noreferrer"
       download={att.filename}

@@ -14,6 +14,7 @@ import { Trash2, ImagePlus, X } from 'lucide-react';
 import { useEmojis, useUploadEmoji, useDeleteEmoji } from '@/hooks/useEmoji';
 import { useAuth } from '@/context/AuthContext';
 import { formatBytes } from '@/lib/format';
+import { resolveMediaUrl } from '@/lib/api';
 
 interface Props {
   open: boolean;
@@ -203,7 +204,7 @@ export function EmojiManagerDialog({ open, onOpenChange }: Props) {
                     key={e.name}
                     className="flex items-center gap-2 rounded-md border px-2 py-1.5"
                   >
-                    <img src={e.imageURL} alt={`:${e.name}:`} className="h-6 w-6" />
+                    <img src={resolveMediaUrl(e.imageURL)} alt={`:${e.name}:`} className="h-6 w-6" />
                     <span className="flex-1 text-xs font-mono truncate">:{e.name}:</span>
                     {canDelete(e.createdBy) && (
                       <button

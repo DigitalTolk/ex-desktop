@@ -1,4 +1,5 @@
 import { shortcodeToUnicode } from '@/lib/emoji-shortcodes';
+import { resolveMediaUrl } from '@/lib/api';
 
 type EmojiGlyphSize = 'sm' | 'lg' | 'xl';
 
@@ -23,7 +24,7 @@ export function EmojiGlyph({ emoji, customMap, size = 'sm', className = '' }: Em
     if (url) {
       return (
         <img
-          src={url}
+          src={resolveMediaUrl(url)}
           alt={emoji}
           title={emoji}
           className={`inline-block align-text-bottom ${imgCls} ${className}`}

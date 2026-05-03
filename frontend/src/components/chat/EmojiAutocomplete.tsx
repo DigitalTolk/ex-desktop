@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { COMMON_EMOJI_SHORTCODES } from '@/lib/emoji-shortcodes';
 import { useEmojis } from '@/hooks/useEmoji';
 import { EmojiGlyph } from '@/components/EmojiGlyph';
+import { resolveMediaUrl } from '@/lib/api';
 
 // EmojiSuggestion is what the editor inserts. Custom emojis carry an
 // imageURL so the popup row can preview them; standard ones use the
@@ -128,7 +129,7 @@ export function EmojiAutocomplete({ query, anchorRect, onPick, onDismiss }: Prop
               {it.kind === 'standard' ? (
                 <EmojiGlyph emoji={it.unicode} />
               ) : (
-                <img src={it.imageURL} alt="" className="h-5 w-5" />
+                <img src={resolveMediaUrl(it.imageURL)} alt="" className="h-5 w-5" />
               )}
             </span>
             <span className="font-mono text-xs">:{it.name}:</span>

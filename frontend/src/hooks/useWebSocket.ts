@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getAccessToken } from '@/lib/api';
-import { useServer } from '@/context/ServerContext';
+import { getAccessToken, getBaseUrl } from '@/lib/api';
 import { EventType } from '@/lib/event-types';
 import { setWSSender } from '@/lib/ws-sender';
 
@@ -30,7 +29,6 @@ interface UseWebSocketOptions {
 }
 
 export function useWebSocket(options: UseWebSocketOptions) {
-  const { serverUrl } = useServer();
   const callbacksRef = useRef(options);
   const wsRef = useRef<WebSocket | null>(null);
   const retryCountRef = useRef(0);
@@ -49,9 +47,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
       const token = getAccessToken();
       if (!token) return;
 
-      // Use serverUrl from React context (reliable), falling back to
-      // window.location for the web/dev-proxy path where serverUrl is ''.
-      const base = serverUrl || '';
+      const base = getBaseUrl();
       const url = base
         ? `${base.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')}/api/v1/ws?token=${encodeURIComponent(token)}`
         : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
@@ -157,5 +153,5 @@ export function useWebSocket(options: UseWebSocketOptions) {
       }
       setWSSender(null);
     };
-  }, [options.enabled, serverUrl]);
+  }, [options.enabled]);
 }
