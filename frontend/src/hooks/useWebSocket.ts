@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getAccessToken } from '@/lib/api';
+import { getAccessToken, getBaseUrl } from '@/lib/api';
 import { EventType } from '@/lib/event-types';
 import { setWSSender } from '@/lib/ws-sender';
 
@@ -47,8 +47,10 @@ export function useWebSocket(options: UseWebSocketOptions) {
       const token = getAccessToken();
       if (!token) return;
 
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const url = `${proto}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
+      const base = getBaseUrl();
+      const url = base
+        ? `${base.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')}/api/v1/ws?token=${encodeURIComponent(token)}`
+        : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
