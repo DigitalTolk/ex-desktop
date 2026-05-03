@@ -100,7 +100,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: tauri
-          args: ${{ matrix.args }}
+          args: >-
+            ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
           releaseAssetNamePattern: ${{ matrix.asset_name_pattern }}
           tagName: ${{ github.ref_name }}
           releaseName: 'ex Desktop ${{ github.ref_name }}'
