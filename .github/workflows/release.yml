@@ -52,13 +52,6 @@ jobs:
         with:
           targets: ${{ matrix.args != '' && (contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || 'x86_64-apple-darwin') || '' }}
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # Include frontend source in cache key so Rust rebuilds when JS changes
-          key: ${{ hashFiles('frontend/src/**') }}
-
       - name: Sync version from tag
         shell: bash
         run: |
