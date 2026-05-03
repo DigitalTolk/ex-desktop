@@ -100,18 +100,31 @@ pub async fn start_oauth_server(app: AppHandle, server_url: String) -> Result<u1
             let n = stream.read(&mut buf).await.unwrap_or(0);
             let request = String::from_utf8_lossy(&buf[..n]);
 
-            // First line: "GET /callback?token=... HTTP/1.1"
-            let token = request
+            // First line: "GET /callback?token=...&refresh=... HTTP/1.1"
+            let query_string = request
                 .lines()
                 .next()
                 .and_then(|line| line.split_whitespace().nth(1))
                 .and_then(|path| path.split('?').nth(1))
-                .and_then(|query| {
-                    query.split('&').find_map(|kv| {
-                        let mut it = kv.splitn(2, '=');
-                        if it.next()? == "token" { it.next().map(String::from) } else { None }
-                    })
-                });
+                .map(String::from)
+                .unwrap_or_default();
+
+            let get_param = |key: &str| -> Option<String> {
+                query_string.split('&').find_map(|kv| {
+                    let mut it = kv.splitn(2, '=');
+                    if it.next()? == key { it.next().map(String::from) } else { None }
+                })
+            };
+
+            let token = get_param("token");
+            let refresh = get_param("refresh");
+
+            // Store refresh token in keychain immediately so tryRestore() works on reload.
+            if let Some(ref rt) = refresh {
+                if let Ok(entry) = Entry::new(KEYRING_SERVICE, KEYRING_REFRESH_TOKEN) {
+                    let _ = entry.set_password(rt);
+                }
+            }
 
             let result: Option<OAuthComplete> = if let Some(ref t) = token {
                 let me_url = format!("{}/api/v1/users/me", server_url.trim_end_matches('/'));
