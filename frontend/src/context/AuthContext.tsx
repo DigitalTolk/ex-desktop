@@ -112,7 +112,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           toast.info(`[dbg] oauth-token received (${token.length} chars)`);
           setAccessToken(token);
           try {
-            const user = await apiFetch<User>('/api/v1/users/me');
+            // Use `base` explicitly — apiFetch relies on a module-level baseUrl
+            // that may not be set yet on first launch (macOS: "Load failed").
+            const res = await fetch(`${base}/api/v1/users/me`, {
+              headers: { Authorization: `Bearer ${token}` },
+              credentials: 'include',
+            });
+            toast.info(`[dbg] /users/me status: ${res.status}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+            const user = await res.json() as User;
             setAuth(token, user);
           } catch (e) {
             toast.error(`[dbg] /users/me failed: ${e}`);
