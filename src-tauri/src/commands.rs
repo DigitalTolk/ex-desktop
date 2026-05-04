@@ -26,6 +26,57 @@ fn remote_main_init_script() -> Result<String, String> {
   }});
 
   let authRequiredShown = false;
+  function requestDockAttention() {{
+    try {{
+      globalThis.__TAURI_INTERNALS__?.invoke('request_notification_attention');
+    }} catch {{
+      // ignore
+    }}
+  }}
+
+  function installNotificationAttentionBridge() {{
+    try {{
+      const NativeNotification = globalThis.Notification;
+      if (
+        typeof NativeNotification !== 'function' ||
+        NativeNotification.__exDesktopAttentionBridge
+      ) {{
+        return false;
+      }}
+
+      function DesktopNotification(title, options) {{
+        const notification = new NativeNotification(title, options);
+        requestDockAttention();
+        return notification;
+      }}
+
+      Object.setPrototypeOf(DesktopNotification, NativeNotification);
+      DesktopNotification.prototype = NativeNotification.prototype;
+      Object.defineProperties(
+        DesktopNotification,
+        Object.getOwnPropertyDescriptors(NativeNotification)
+      );
+      Object.defineProperty(DesktopNotification, '__exDesktopAttentionBridge', {{
+        value: true,
+        configurable: false
+      }});
+      globalThis.Notification = DesktopNotification;
+      return true;
+    }} catch {{
+      return false;
+    }}
+  }}
+
+  if (!installNotificationAttentionBridge()) {{
+    let attempts = 0;
+    const timer = globalThis.setInterval(() => {{
+      attempts += 1;
+      if (installNotificationAttentionBridge() || attempts >= 20) {{
+        globalThis.clearInterval(timer);
+      }}
+    }}, 250);
+  }}
+
   function showAuthRequired() {{
     if (authRequiredShown || document.getElementById('__ex-desktop-auth-required')) {{
       return;
@@ -675,6 +726,19 @@ pub fn start_relogin(app: AppHandle) -> Result<(), String> {
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+pub fn request_notification_attention(app: AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    if window.is_focused().unwrap_or(false) {
+        return Ok(());
+    }
+    window
+        .request_user_attention(Some(tauri::UserAttentionType::Informational))
+        .map_err(|e| e.to_string())
 }
 
 /// Updates the tray icon and tooltip to reflect the unread message count.

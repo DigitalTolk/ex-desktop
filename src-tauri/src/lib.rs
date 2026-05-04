@@ -280,6 +280,7 @@ pub fn run() {
             commands::clear_server_url,
             commands::show_setup_window,
             commands::start_relogin,
+            commands::request_notification_attention,
             commands::set_badge_count,
         ])
         .run(tauri::generate_context!())
