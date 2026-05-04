@@ -33,7 +33,8 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/AppIcon.icon"
+      "icons/AppIcon.icon",
+      "icons/icon.ico"
     ],
     "linux": {
       "deb": {
