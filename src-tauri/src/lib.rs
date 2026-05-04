@@ -41,10 +41,30 @@ fn configure_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let reload_i = MenuItem::with_id(app, "reload-chat", "Reload Chat", true, Some("CmdOrCtrl+R"))?;
+    let test_notification_i = MenuItem::with_id(
+        app,
+        "test-notification",
+        "Test Notification",
+        true,
+        None::<&str>,
+    )?;
+    let test_background_notification_i = MenuItem::with_id(
+        app,
+        "test-background-notification",
+        "Test Background Notification",
+        true,
+        None::<&str>,
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
 
     if let Some(MenuItemKind::Submenu(first_menu)) = app_menu.items()?.into_iter().next() {
-        first_menu.prepend_items(&[&switch_chat_url_i, &reload_i, &sep])?;
+        first_menu.prepend_items(&[
+            &switch_chat_url_i,
+            &reload_i,
+            &test_notification_i,
+            &test_background_notification_i,
+            &sep,
+        ])?;
     }
 
     app.set_menu(app_menu)?;
@@ -219,6 +239,31 @@ pub fn run() {
                         let _ = window.eval("globalThis.location.reload()");
                     }
                 }
+                "test-notification" => {
+                    if let Err(err) = commands::send_desktop_notification(
+                        app.clone(),
+                        "ex test notification".to_string(),
+                        Some("This was sent directly from the desktop app.".to_string()),
+                    ) {
+                        log::warn!("Could not send test notification: {err}");
+                    }
+                }
+                "test-background-notification" => {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
+                        if let Err(err) = commands::send_desktop_notification(
+                            app,
+                            "ex background notification".to_string(),
+                            Some("This was sent after hiding the app window.".to_string()),
+                        ) {
+                            log::warn!("Could not send background test notification: {err}");
+                        }
+                    });
+                }
                 _ => {}
             });
 
@@ -281,6 +326,7 @@ pub fn run() {
             commands::show_setup_window,
             commands::start_relogin,
             commands::request_notification_attention,
+            commands::send_desktop_notification,
             commands::set_badge_count,
         ])
         .run(tauri::generate_context!())

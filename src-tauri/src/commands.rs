@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use tauri::webview::{DownloadEvent, NewWindowResponse, WebviewWindowBuilder};
 use tauri::{image::Image, webview::PageLoadEvent, AppHandle, Manager, WebviewUrl, WebviewWindow};
+#[cfg(not(target_os = "macos"))]
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 use url::Url;
@@ -24,54 +26,13 @@ fn remote_main_init_script() -> Result<String, String> {
     writable: false,
     configurable: false
   }});
+  Object.defineProperty(globalThis, '__EX_DESKTOP__', {{
+    value: true,
+    writable: false,
+    configurable: false
+  }});
 
   let authRequiredShown = false;
-  function requestDockAttention() {{
-    try {{
-      globalThis.__TAURI_INTERNALS__?.invoke('request_notification_attention');
-    }} catch {{
-      // ignore
-    }}
-  }}
-
-  function installNotificationAttentionBridge() {{
-    try {{
-      const NativeNotification = globalThis.Notification;
-      if (
-        typeof NativeNotification !== 'function' ||
-        NativeNotification.__exDesktopAttentionBridge
-      ) {{
-        return false;
-      }}
-
-      function DesktopNotification(title, options) {{
-        const nativeOptions = Object.assign({{}}, options || {{}});
-        // Browser notifications accept web asset URLs such as /logo.svg, but
-        // Tauri's native notification backend expects platform icon names or
-        // filesystem paths. Passing the web URL prevents the toast from
-        // rendering on macOS, so let the OS use the app icon instead.
-        delete nativeOptions.icon;
-        const notification = new NativeNotification(title, nativeOptions);
-        requestDockAttention();
-        return notification;
-      }}
-
-      Object.setPrototypeOf(DesktopNotification, NativeNotification);
-      DesktopNotification.prototype = NativeNotification.prototype;
-      Object.defineProperties(
-        DesktopNotification,
-        Object.getOwnPropertyDescriptors(NativeNotification)
-      );
-      Object.defineProperty(DesktopNotification, '__exDesktopAttentionBridge', {{
-        value: true,
-        configurable: false
-      }});
-      globalThis.Notification = DesktopNotification;
-      return true;
-    }} catch {{
-      return false;
-    }}
-  }}
 
   function unreadCountFromTitle() {{
     const match = /^\\((\\d+)\\)\\s+/.exec(document.title || '');
@@ -123,15 +84,6 @@ fn remote_main_init_script() -> Result<String, String> {
     }}, 250);
   }}
 
-  if (!installNotificationAttentionBridge()) {{
-    let attempts = 0;
-    const timer = globalThis.setInterval(() => {{
-      attempts += 1;
-      if (installNotificationAttentionBridge() || attempts >= 20) {{
-        globalThis.clearInterval(timer);
-      }}
-    }}, 250);
-  }}
   installUnreadBadgeBridge();
 
   function showAuthRequired() {{
@@ -845,6 +797,60 @@ pub fn request_notification_attention(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn send_desktop_notification(
+    app: AppHandle,
+    title: String,
+    body: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    send_macos_user_notification(&app, &title, body.as_deref())?;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut notification = app.notification().builder().title(title);
+        if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+            notification = notification.body(body);
+        }
+        notification.show().map_err(|e| e.to_string())?;
+    }
+
+    request_notification_attention(app)
+}
+
+#[cfg(target_os = "macos")]
+fn send_macos_user_notification(
+    _app: &AppHandle,
+    title: &str,
+    body: Option<&str>,
+) -> Result<(), String> {
+    use objc2_foundation::NSString;
+    use objc2_user_notifications::{
+        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
+        UNUserNotificationCenter,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&NSString::from_str(title));
+    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+        content.setBody(&NSString::from_str(body));
+    }
+    content.setSound(Some(&UNNotificationSound::defaultSound()));
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let identifier = NSString::from_str(&format!("ex-desktop-{timestamp}"));
+    let request =
+        UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
+
+    UNUserNotificationCenter::currentNotificationCenter()
+        .addNotificationRequest_withCompletionHandler(&request, None);
+    Ok(())
+}
+
 /// Updates the tray icon and tooltip to reflect the unread message count.
 #[tauri::command]
 pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
@@ -899,10 +905,13 @@ mod tests {
     fn remote_init_script_bridges_unread_title_to_badge_count() {
         let script = remote_main_init_script().unwrap();
 
+        assert!(script.contains("'__EX_DESKTOP__'"));
         assert!(script.contains("unreadCountFromTitle"));
         assert!(script.contains("invoke('set_badge_count', { count })"));
         assert!(script.contains("MutationObserver(syncUnreadBadge)"));
-        assert!(script.contains("delete nativeOptions.icon"));
+        assert!(!script.contains("globalThis.Notification ="));
+        assert!(!script.contains("ServiceWorkerRegistration"));
+        assert!(!script.contains("prototype.showNotification"));
     }
 
     #[test]
