@@ -45,7 +45,13 @@ fn remote_main_init_script() -> Result<String, String> {
       }}
 
       function DesktopNotification(title, options) {{
-        const notification = new NativeNotification(title, options);
+        const nativeOptions = Object.assign({{}}, options || {{}});
+        // Browser notifications accept web asset URLs such as /logo.svg, but
+        // Tauri's native notification backend expects platform icon names or
+        // filesystem paths. Passing the web URL prevents the toast from
+        // rendering on macOS, so let the OS use the app icon instead.
+        delete nativeOptions.icon;
+        const notification = new NativeNotification(title, nativeOptions);
         requestDockAttention();
         return notification;
       }}
@@ -896,6 +902,7 @@ mod tests {
         assert!(script.contains("unreadCountFromTitle"));
         assert!(script.contains("invoke('set_badge_count', { count })"));
         assert!(script.contains("MutationObserver(syncUnreadBadge)"));
+        assert!(script.contains("delete nativeOptions.icon"));
     }
 
     #[test]
