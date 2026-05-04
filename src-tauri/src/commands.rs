@@ -1,15 +1,98 @@
 use std::path::PathBuf;
 use tauri::webview::{DownloadEvent, NewWindowResponse, WebviewWindowBuilder};
 use tauri::{image::Image, webview::PageLoadEvent, AppHandle, Manager, WebviewUrl, WebviewWindow};
+#[cfg(not(target_os = "macos"))]
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 use url::Url;
 
 use crate::config::normalize_server_url;
+#[cfg(target_os = "macos")]
+use std::sync::Once;
 
 const STORE_FILE: &str = "config.json";
 const KEY_SERVER_URL: &str = "serverUrl";
 const LEGACY_KEY_REFRESH_TOKEN: &str = "refreshToken";
+
+fn main_webview_devtools_enabled() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn disable_native_context_menu(window: &WebviewWindow) {
+    let _ = window;
+    filter_wkwebview_context_menu();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn disable_native_context_menu(_window: &WebviewWindow) {}
+
+#[cfg(target_os = "macos")]
+fn native_context_menu_will_open_selector_name() -> &'static std::ffi::CStr {
+    c"willOpenMenu:withEvent:"
+}
+
+#[cfg(target_os = "macos")]
+fn filter_wkwebview_context_menu() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| unsafe {
+        use objc2::ffi::{class_getInstanceMethod, method_setImplementation};
+        use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+
+        unsafe extern "C-unwind" fn filter_context_menu(
+            _this: *mut AnyObject,
+            _cmd: Sel,
+            menu: *mut AnyObject,
+            _event: *mut AnyObject,
+        ) {
+            if menu.is_null() {
+                return;
+            }
+            let menu = &*(menu as *mut objc2_app_kit::NSMenu);
+            let mut index = menu.numberOfItems();
+            while index > 0 {
+                index -= 1;
+                let Some(item) = menu.itemAtIndex(index) else {
+                    continue;
+                };
+                let title = item.title().to_string().to_lowercase();
+                if title == "back" || title == "reload" {
+                    menu.removeItemAtIndex(index);
+                }
+            }
+            if menu.numberOfItems() == 0 {
+                menu.cancelTracking();
+            }
+        }
+
+        let filter_menu_implementation: Imp = std::mem::transmute(
+            filter_context_menu
+                as unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject),
+        );
+        for class_name in [c"WKWebView", c"WKContentView"] {
+            let Some(class) = AnyClass::get(class_name) else {
+                log::warn!(
+                    "Could not find {} class to disable native context menu",
+                    class_name.to_string_lossy()
+                );
+                continue;
+            };
+            let method = class_getInstanceMethod(
+                class,
+                Sel::register(native_context_menu_will_open_selector_name()),
+            );
+            if method.is_null() {
+                log::warn!(
+                    "Could not find {} willOpenMenu:withEvent: to filter native context menu",
+                    class_name.to_string_lossy()
+                );
+                continue;
+            }
+            let _ = method_setImplementation(method, filter_menu_implementation);
+        }
+    });
+}
 
 #[allow(clippy::useless_format)]
 fn remote_main_init_script() -> Result<String, String> {
@@ -24,54 +107,13 @@ fn remote_main_init_script() -> Result<String, String> {
     writable: false,
     configurable: false
   }});
+  Object.defineProperty(globalThis, '__EX_DESKTOP__', {{
+    value: true,
+    writable: false,
+    configurable: false
+  }});
 
   let authRequiredShown = false;
-  function requestDockAttention() {{
-    try {{
-      globalThis.__TAURI_INTERNALS__?.invoke('request_notification_attention');
-    }} catch {{
-      // ignore
-    }}
-  }}
-
-  function installNotificationAttentionBridge() {{
-    try {{
-      const NativeNotification = globalThis.Notification;
-      if (
-        typeof NativeNotification !== 'function' ||
-        NativeNotification.__exDesktopAttentionBridge
-      ) {{
-        return false;
-      }}
-
-      function DesktopNotification(title, options) {{
-        const nativeOptions = Object.assign({{}}, options || {{}});
-        // Browser notifications accept web asset URLs such as /logo.svg, but
-        // Tauri's native notification backend expects platform icon names or
-        // filesystem paths. Passing the web URL prevents the toast from
-        // rendering on macOS, so let the OS use the app icon instead.
-        delete nativeOptions.icon;
-        const notification = new NativeNotification(title, nativeOptions);
-        requestDockAttention();
-        return notification;
-      }}
-
-      Object.setPrototypeOf(DesktopNotification, NativeNotification);
-      DesktopNotification.prototype = NativeNotification.prototype;
-      Object.defineProperties(
-        DesktopNotification,
-        Object.getOwnPropertyDescriptors(NativeNotification)
-      );
-      Object.defineProperty(DesktopNotification, '__exDesktopAttentionBridge', {{
-        value: true,
-        configurable: false
-      }});
-      globalThis.Notification = DesktopNotification;
-      return true;
-    }} catch {{
-      return false;
-    }}
-  }}
 
   function unreadCountFromTitle() {{
     const match = /^\\((\\d+)\\)\\s+/.exec(document.title || '');
@@ -123,15 +165,253 @@ fn remote_main_init_script() -> Result<String, String> {
     }}, 250);
   }}
 
-  if (!installNotificationAttentionBridge()) {{
-    let attempts = 0;
-    const timer = globalThis.setInterval(() => {{
-      attempts += 1;
-      if (installNotificationAttentionBridge() || attempts >= 20) {{
-        globalThis.clearInterval(timer);
-      }}
-    }}, 250);
+  function selectedContextMenuText() {{
+    return String(globalThis.getSelection?.() || '').trim();
   }}
+
+  function contextMenuAnchor(target) {{
+    const element = target?.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
+    return element?.closest?.('a[href]') || null;
+  }}
+
+  function eventAnchor(event) {{
+    for (const item of event.composedPath?.() || []) {{
+      if (item instanceof HTMLAnchorElement && item.href) {{
+        return item;
+      }}
+      if (item instanceof Element) {{
+        const anchor = item.closest?.('a[href]');
+        if (anchor?.href) {{
+          return anchor;
+        }}
+      }}
+    }}
+    return contextMenuAnchor(event.target);
+  }}
+
+  function desktopExternalURL(href) {{
+    try {{
+      const url = new URL(href, globalThis.location.href);
+      if (url.protocol === 'mailto:') {{
+        return url;
+      }}
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {{
+        return null;
+      }}
+      return url.origin === globalThis.location.origin ? null : url;
+    }} catch {{
+      return null;
+    }}
+  }}
+
+  function openExternalURL(url) {{
+    const invoke = globalThis.__TAURI_INTERNALS__?.invoke;
+    if (typeof invoke !== 'function') {{
+      return Promise.reject(new Error('Tauri IPC invoke is not available'));
+    }}
+    return invoke('open_external_link', {{ url: url.href }}).catch(() => {{
+      return invoke('plugin:opener|open_url', {{ url: url.href }});
+    }});
+  }}
+
+  function installExternalLinkBridge() {{
+    const onExternalLinkClick = (event) => {{
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {{
+        return;
+      }}
+
+      const anchor = eventAnchor(event);
+      if (!anchor?.href) {{
+        return;
+      }}
+
+      const url = desktopExternalURL(anchor.href);
+      if (!url) {{
+        return;
+      }}
+
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      void openExternalURL(url).then(
+        () => {{}},
+        (error) => {{
+          globalThis.location.href = url.href;
+        }}
+      );
+    }};
+
+    globalThis.addEventListener('click', onExternalLinkClick, true);
+    document.addEventListener(
+      'click',
+      onExternalLinkClick,
+      true
+    );
+  }}
+
+  function installWindowOpenBridge() {{
+    const originalOpen = globalThis.open?.bind(globalThis);
+    globalThis.open = (rawUrl, target, features) => {{
+      const url = desktopExternalURL(String(rawUrl || ''));
+      if (!url) {{
+        return originalOpen?.(rawUrl, target, features) || null;
+      }}
+      void openExternalURL(url).then(
+        () => {{}},
+        (error) => {{
+          originalOpen?.(url.href, target, features);
+        }}
+      );
+      return null;
+    }};
+  }}
+
+  function installExternalFormBridge() {{
+    document.addEventListener(
+      'submit',
+      (event) => {{
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.action) {{
+          return;
+        }}
+
+        const url = desktopExternalURL(form.action);
+        if (!url) {{
+          return;
+        }}
+
+        event.preventDefault();
+        void openExternalURL(url).then(
+          () => {{}},
+          (error) => {{
+            globalThis.location.href = url.href;
+          }}
+        );
+      }},
+      true
+    );
+  }}
+
+  function copyContextMenuText(value) {{
+    if (navigator.clipboard?.writeText) {{
+      return navigator.clipboard.writeText(value);
+    }}
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    input.remove();
+    return Promise.resolve();
+  }}
+
+  function removeDesktopContextMenu() {{
+    document.getElementById('__ex-desktop-context-menu')?.remove();
+  }}
+
+  function showDesktopContextMenu(event, items) {{
+    removeDesktopContextMenu();
+    if (!items.length || !document.body) {{
+      return;
+    }}
+
+    const menu = document.createElement('div');
+    menu.id = '__ex-desktop-context-menu';
+    menu.setAttribute('role', 'menu');
+    Object.assign(menu.style, {{
+      position: 'fixed',
+      left: `${{event.clientX}}px`,
+      top: `${{event.clientY}}px`,
+      zIndex: '2147483647',
+      minWidth: '128px',
+      padding: '4px 0',
+      borderRadius: '6px',
+      border: '1px solid rgba(15, 23, 42, 0.14)',
+      background: 'rgba(255, 255, 255, 0.98)',
+      color: '#0f172a',
+      font: '13px/1.2 system-ui, sans-serif',
+      boxShadow: '0 12px 36px rgba(15, 23, 42, 0.22)'
+    }});
+
+    for (const item of items) {{
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.textContent = item.label;
+      Object.assign(button.style, {{
+        display: 'block',
+        width: '100%',
+        border: '0',
+        padding: '7px 12px',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        textAlign: 'left',
+        cursor: 'default'
+      }});
+      button.addEventListener('mouseenter', () => {{
+        button.style.background = 'rgba(15, 23, 42, 0.08)';
+      }});
+      button.addEventListener('mouseleave', () => {{
+        button.style.background = 'transparent';
+      }});
+      button.addEventListener('click', () => {{
+        void copyContextMenuText(item.value);
+        removeDesktopContextMenu();
+      }});
+      menu.appendChild(button);
+    }}
+
+    document.body.appendChild(menu);
+  }}
+
+  function installDesktopContextMenu() {{
+    const onContextMenu = (event) => {{
+      event.preventDefault();
+
+      const anchor = contextMenuAnchor(event.target);
+      if (anchor?.closest?.('[data-ex-desktop-link="true"]')) {{
+        return;
+      }}
+
+      const selectedText = selectedContextMenuText();
+      const items = [];
+      if (selectedText) {{
+        items.push({{ label: 'Copy', value: selectedText }});
+      }}
+      if (anchor?.href) {{
+        items.push({{ label: 'Copy Link', value: anchor.href }});
+      }}
+      showDesktopContextMenu(event, items);
+    }};
+
+    document.addEventListener('contextmenu', onContextMenu, true);
+    document.addEventListener('click', removeDesktopContextMenu, true);
+    document.addEventListener('scroll', removeDesktopContextMenu, true);
+    document.addEventListener(
+      'keydown',
+      (event) => {{
+        if (event.key === 'Escape') {{
+          removeDesktopContextMenu();
+        }}
+      }},
+      true
+    );
+  }}
+
+  installExternalLinkBridge();
+  installWindowOpenBridge();
+  installExternalFormBridge();
+  installDesktopContextMenu();
   installUnreadBadgeBridge();
 
   function showAuthRequired() {{
@@ -473,6 +753,7 @@ pub(crate) fn open_or_navigate_main_window(
             }
         })
         .initialization_script(init_script)
+        .devtools(main_webview_devtools_enabled())
         .disable_drag_drop_handler()
         .title("ex")
         .data_directory(data_dir)
@@ -485,6 +766,7 @@ pub(crate) fn open_or_navigate_main_window(
     if let Some(icon) = app.default_window_icon() {
         let _ = window.set_icon(icon.clone());
     }
+    disable_native_context_menu(&window);
 
     let _ = window.show();
     let _ = window.set_focus();
@@ -527,6 +809,16 @@ fn open_external_url(app: &AppHandle, url: &Url) -> Result<(), String> {
     app.opener()
         .open_url(url.as_str(), None::<String>)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn open_external_link(app: AppHandle, url: String) -> Result<(), String> {
+    let url = Url::parse(&url).map_err(|e| e.to_string())?;
+    if should_open_externally(&app, &url) {
+        open_external_url(&app, &url)
+    } else {
+        Ok(())
+    }
 }
 
 fn same_origin(left: &Url, right: &Url) -> bool {
@@ -845,6 +1137,60 @@ pub fn request_notification_attention(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn send_desktop_notification(
+    app: AppHandle,
+    title: String,
+    body: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    send_macos_user_notification(&app, &title, body.as_deref())?;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut notification = app.notification().builder().title(title);
+        if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+            notification = notification.body(body);
+        }
+        notification.show().map_err(|e| e.to_string())?;
+    }
+
+    request_notification_attention(app)
+}
+
+#[cfg(target_os = "macos")]
+fn send_macos_user_notification(
+    _app: &AppHandle,
+    title: &str,
+    body: Option<&str>,
+) -> Result<(), String> {
+    use objc2_foundation::NSString;
+    use objc2_user_notifications::{
+        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
+        UNUserNotificationCenter,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&NSString::from_str(title));
+    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+        content.setBody(&NSString::from_str(body));
+    }
+    content.setSound(Some(&UNNotificationSound::defaultSound()));
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let identifier = NSString::from_str(&format!("ex-desktop-{timestamp}"));
+    let request =
+        UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
+
+    UNUserNotificationCenter::currentNotificationCenter()
+        .addNotificationRequest_withCompletionHandler(&request, None);
+    Ok(())
+}
+
 /// Updates the tray icon and tooltip to reflect the unread message count.
 #[tauri::command]
 pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
@@ -883,10 +1229,12 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::native_context_menu_will_open_selector_name;
     use super::{
         filename_for_download, filename_from_content_disposition, is_attachment_download_url,
-        login_url_for_server, oidc_callback_query, percent_decode, remote_main_init_script,
-        same_origin, sanitize_filename,
+        login_url_for_server, main_webview_devtools_enabled, oidc_callback_query, percent_decode,
+        remote_main_init_script, same_origin, sanitize_filename,
     };
     use url::Url;
 
@@ -899,10 +1247,186 @@ mod tests {
     fn remote_init_script_bridges_unread_title_to_badge_count() {
         let script = remote_main_init_script().unwrap();
 
+        assert!(script.contains("'__EX_DESKTOP__'"));
         assert!(script.contains("unreadCountFromTitle"));
         assert!(script.contains("invoke('set_badge_count', { count })"));
         assert!(script.contains("MutationObserver(syncUnreadBadge)"));
-        assert!(script.contains("delete nativeOptions.icon"));
+        assert!(!script.contains("installMinimalContextMenu"));
+        assert!(!script.contains("globalThis.Notification ="));
+        assert!(!script.contains("ServiceWorkerRegistration"));
+        assert!(!script.contains("prototype.showNotification"));
+    }
+
+    #[test]
+    fn remote_init_script_opens_external_links_with_system_browser() {
+        let script = remote_main_init_script().unwrap();
+
+        assert!(script.contains("installExternalLinkBridge"));
+        assert!(script.contains("document.addEventListener(\n      'click'"));
+        assert!(script.contains("contextMenuAnchor(event.target)"));
+        assert!(script.contains("event.composedPath?.()"));
+        assert!(script.contains("url.protocol === 'mailto:'"));
+        assert!(script.contains("url.protocol !== 'http:' && url.protocol !== 'https:'"));
+        assert!(script.contains("url.origin === globalThis.location.origin ? null : url"));
+        assert!(script.contains("Tauri IPC invoke is not available"));
+        assert!(script.contains("invoke('open_external_link', { url: url.href })"));
+        assert!(script.contains("invoke('plugin:opener|open_url', { url: url.href })"));
+        assert!(script.contains("event.preventDefault()"));
+        assert!(script.contains("event.stopImmediatePropagation?.()"));
+        assert!(script.contains("globalThis.addEventListener('click', onExternalLinkClick, true)"));
+        assert!(script.contains("installWindowOpenBridge"));
+        assert!(script.contains("installExternalFormBridge"));
+        assert!(!script.contains("__EX_DESKTOP_LINK_DIAGNOSTICS__"));
+        assert!(!script.contains("__EX_DESKTOP_TEST_EXTERNAL_LINK__"));
+        assert!(!script.contains("console.info('[ex-desktop-link]'"));
+    }
+
+    #[test]
+    fn remote_chat_capability_allows_only_required_injected_commands() {
+        use std::str::FromStr;
+
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/remote-chat.json")).unwrap();
+        let urls = capability
+            .pointer("/remote/urls")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        let permissions = capability
+            .get("permissions")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        let permissions = permissions
+            .iter()
+            .map(|permission| permission.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert!(urls.iter().any(|url| url == "http://*"));
+        assert!(urls.iter().any(|url| url == "http://*:*"));
+        assert!(urls.iter().any(|url| url == "https://*"));
+        assert!(urls.iter().any(|url| url == "https://*:*"));
+        for (pattern, url) in [
+            (
+                "http://*:*",
+                "http://localhost:5173/channel/general?x=1#message",
+            ),
+            (
+                "https://*",
+                "https://chat.example.com/channel/general?x=1#message",
+            ),
+            (
+                "https://*:*",
+                "https://chat.example.com:8443/channel/general?x=1#message",
+            ),
+        ] {
+            let pattern = tauri::utils::acl::RemoteUrlPattern::from_str(pattern).unwrap();
+            assert!(
+                pattern.test(&Url::parse(url).unwrap()),
+                "remote pattern must match full chat page URLs"
+            );
+        }
+        assert_eq!(
+            permissions,
+            vec![
+                "allow-show-setup-window",
+                "allow-start-relogin",
+                "allow-set-badge-count",
+                "allow-open-external-link",
+                "opener:allow-default-urls",
+                "opener:allow-open-url",
+            ]
+        );
+        assert!(!permissions.iter().any(|permission| {
+            permission.starts_with("store:")
+                || permission.starts_with("updater:")
+                || permission.starts_with("global-shortcut:")
+        }));
+    }
+
+    #[test]
+    fn app_manifest_generates_permissions_for_remote_injected_commands() {
+        let build_script = include_str!("../build.rs");
+
+        for command in [
+            "show_setup_window",
+            "start_relogin",
+            "set_badge_count",
+            "open_external_link",
+        ] {
+            assert!(
+                build_script.contains(command),
+                "build.rs must generate an allow/deny permission for {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn csp_allows_tauri_ipc_connect_sources() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = config
+            .pointer("/app/security/csp")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+
+        assert!(csp.contains("connect-src"));
+        assert!(csp.contains("ipc:"));
+        assert!(csp.contains("http://ipc.localhost"));
+    }
+
+    #[test]
+    fn remote_init_script_suppresses_native_context_menu() {
+        let script = remote_main_init_script().unwrap();
+
+        assert!(script.contains("installDesktopContextMenu"));
+        assert!(script.contains("document.addEventListener('contextmenu', onContextMenu, true)"));
+        assert!(script.contains("event.preventDefault()"));
+        assert!(script.contains("__ex-desktop-context-menu"));
+        assert!(script.contains("Copy Link"));
+        assert!(script.contains("data-ex-desktop-link"));
+        assert!(!script.contains("event.stopPropagation()"));
+        assert!(!script.contains("Reload"));
+        assert!(!script.contains("Inspect Element"));
+    }
+
+    #[test]
+    fn release_build_does_not_enable_tauri_devtools_context_menu() {
+        let manifest = include_str!("../Cargo.toml");
+        let tauri_dependency_line = manifest
+            .lines()
+            .find(|line| line.trim_start().starts_with("tauri "))
+            .expect("tauri dependency should be declared");
+
+        assert!(
+            !tauri_dependency_line.contains("\"devtools\""),
+            "the tauri devtools feature enables Inspect Element from the macOS WebKit context menu"
+        );
+        assert!(
+            !main_webview_devtools_enabled(),
+            "main webview devtools should stay disabled so WebKit does not add Inspect Element"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_context_menu_override_targets_webkit_content_view() {
+        let source = include_str!("commands.rs");
+
+        assert!(source.contains("WKWebView"));
+        assert!(source.contains("WKContentView"));
+        assert!(source.contains("method_setImplementation"));
+        assert!(!source.contains(&format!("{}{}", "menuFor", "Event:")));
+        assert!(!source.contains(&format!("{}{}", "no_context", "_menu")));
+        assert!(!source.contains(&format!("{}{}", "set", "Menu")));
+        assert!(!source.contains(&format!("{}{}", "rightMouse", "Down:")));
+        assert!(!source.contains(&format!("{}{}", "rightMouse", "Up:")));
+        assert_eq!(
+            native_context_menu_will_open_selector_name()
+                .to_str()
+                .unwrap(),
+            "willOpenMenu:withEvent:"
+        );
+        assert!(source.contains("title == \"back\" || title == \"reload\""));
     }
 
     #[test]
