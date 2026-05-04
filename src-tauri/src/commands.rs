@@ -458,6 +458,28 @@ fn open_attachment_download_url(app: &AppHandle, url: &Url) -> Result<(), String
         .map_err(|e| e.to_string())
 }
 
+fn open_external_url(app: &AppHandle, url: &Url) -> Result<(), String> {
+    app.opener()
+        .open_url(url.as_str(), None::<String>)
+        .map_err(|e| e.to_string())
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_workspace_url(app: &AppHandle, url: &Url) -> bool {
+    configured_server_url(app)
+        .and_then(|server_url| Url::parse(&server_url).ok())
+        .is_some_and(|server_url| same_origin(&server_url, url))
+}
+
+fn should_open_externally(app: &AppHandle, url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto") && !is_workspace_url(app, url)
+}
+
 fn filename_for_download(url: &Url, content_disposition: Option<&str>) -> String {
     content_disposition
         .and_then(filename_from_content_disposition)
@@ -571,6 +593,13 @@ fn intercept_navigation(app: &AppHandle, url: &Url) -> bool {
             }
         });
 
+        return false;
+    }
+
+    if should_open_externally(app, url) {
+        if let Err(err) = open_external_url(app, url) {
+            log::warn!("Could not open external URL: {err}");
+        }
         return false;
     }
 
@@ -772,7 +801,7 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
 mod tests {
     use super::{
         filename_for_download, filename_from_content_disposition, is_attachment_download_url,
-        login_url_for_server, oidc_callback_query, percent_decode, sanitize_filename,
+        login_url_for_server, oidc_callback_query, percent_decode, same_origin, sanitize_filename,
     };
     use url::Url;
 
@@ -789,6 +818,16 @@ mod tests {
                 .as_str(),
             "https://chat.example.com/auth/oidc/login"
         );
+    }
+
+    #[test]
+    fn origin_comparison_ignores_paths_but_respects_hosts() {
+        let app = Url::parse("https://chat.example.com/channel/general").unwrap();
+        let same = Url::parse("https://chat.example.com/docs").unwrap();
+        let other = Url::parse("https://example.com/docs").unwrap();
+
+        assert!(same_origin(&app, &same));
+        assert!(!same_origin(&app, &other));
     }
 
     #[test]
