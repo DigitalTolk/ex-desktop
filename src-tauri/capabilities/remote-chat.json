@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-chat",
+  "description": "Narrow IPC capability for the configured remote chat webview",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://*", "http://*:*", "https://*", "https://*:*"]
+  },
+  "permissions": [
+    "allow-show-setup-window",
+    "allow-start-relogin",
+    "allow-set-badge-count",
+    "allow-open-external-link",
+    "opener:allow-default-urls",
+    "opener:allow-open-url"
+  ]
+}

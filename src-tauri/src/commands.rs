@@ -112,8 +112,31 @@ fn remote_main_init_script() -> Result<String, String> {
     writable: false,
     configurable: false
   }});
+  Object.defineProperty(globalThis, '__EX_DESKTOP_LINK_DIAGNOSTICS__', {{
+    value: [],
+    writable: false,
+    configurable: false
+  }});
 
   let authRequiredShown = false;
+
+  function recordDesktopLinkDiagnostic(event, detail) {{
+    const entry = {{
+      event,
+      detail,
+      href: globalThis.location.href,
+      timestamp: new Date().toISOString()
+    }};
+    try {{
+      globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.push(entry);
+      if (globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.length > 50) {{
+        globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.shift();
+      }}
+    }} catch {{}}
+    try {{
+      console.info('[ex-desktop-link]', event, detail);
+    }} catch {{}}
+  }}
 
   function unreadCountFromTitle() {{
     const match = /^\\((\\d+)\\)\\s+/.exec(document.title || '');
@@ -174,6 +197,21 @@ fn remote_main_init_script() -> Result<String, String> {
     return element?.closest?.('a[href]') || null;
   }}
 
+  function eventAnchor(event) {{
+    for (const item of event.composedPath?.() || []) {{
+      if (item instanceof HTMLAnchorElement && item.href) {{
+        return item;
+      }}
+      if (item instanceof Element) {{
+        const anchor = item.closest?.('a[href]');
+        if (anchor?.href) {{
+          return anchor;
+        }}
+      }}
+    }}
+    return contextMenuAnchor(event.target);
+  }}
+
   function desktopExternalURL(href) {{
     try {{
       const url = new URL(href, globalThis.location.href);
@@ -190,38 +228,141 @@ fn remote_main_init_script() -> Result<String, String> {
   }}
 
   function openExternalURL(url) {{
-    return globalThis.__TAURI_INTERNALS__?.invoke?.('open_external_link', {{ url: url.href }});
+    const invoke = globalThis.__TAURI_INTERNALS__?.invoke;
+    if (typeof invoke !== 'function') {{
+      return Promise.reject(new Error('Tauri IPC invoke is not available'));
+    }}
+    return invoke('open_external_link', {{ url: url.href }}).catch((appCommandError) => {{
+      recordDesktopLinkDiagnostic('open-external-app-command-error', {{
+        href: url.href,
+        error: String(appCommandError)
+      }});
+      return invoke('plugin:opener|open_url', {{ url: url.href }});
+    }});
   }}
 
   function installExternalLinkBridge() {{
+    const onExternalLinkClick = (event) => {{
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) {{
+        return;
+      }}
+
+      const anchor = eventAnchor(event);
+      if (!anchor?.href) {{
+        recordDesktopLinkDiagnostic('click-no-anchor', {{
+          target: event.target?.nodeName || null
+        }});
+        return;
+      }}
+
+      const url = desktopExternalURL(anchor.href);
+      if (!url) {{
+        recordDesktopLinkDiagnostic('click-internal-or-unsupported', {{
+          href: anchor.href
+        }});
+        return;
+      }}
+
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      recordDesktopLinkDiagnostic('click-open-external', {{ href: url.href }});
+      void openExternalURL(url).then(
+        () => {{
+          recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
+        }},
+        (error) => {{
+          recordDesktopLinkDiagnostic('open-external-error', {{
+            href: url.href,
+            error: String(error)
+          }});
+          globalThis.location.href = url.href;
+        }}
+      );
+    }};
+
+    globalThis.addEventListener('click', onExternalLinkClick, true);
     document.addEventListener(
       'click',
+      onExternalLinkClick,
+      true
+    );
+
+    globalThis.__EX_DESKTOP_TEST_EXTERNAL_LINK__ = () => {{
+      const anchor = document.createElement('a');
+      anchor.href = 'https://example.com/ex-desktop-link-test';
+      anchor.textContent = 'ex desktop link test';
+      anchor.style.position = 'fixed';
+      anchor.style.left = '0';
+      anchor.style.top = '0';
+      anchor.style.zIndex = '2147483647';
+      anchor.setAttribute('data-ex-desktop-test-link', 'true');
+      document.body?.appendChild(anchor);
+      recordDesktopLinkDiagnostic('test-link-click-dispatch', {{ href: anchor.href }});
+      anchor.click();
+      globalThis.setTimeout(() => anchor.remove(), 1000);
+      return globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__;
+    }};
+  }}
+
+  function installWindowOpenBridge() {{
+    const originalOpen = globalThis.open?.bind(globalThis);
+    globalThis.open = (rawUrl, target, features) => {{
+      const url = desktopExternalURL(String(rawUrl || ''));
+      if (!url) {{
+        return originalOpen?.(rawUrl, target, features) || null;
+      }}
+      recordDesktopLinkDiagnostic('window-open-external', {{ href: url.href }});
+      void openExternalURL(url).then(
+        () => {{
+          recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
+        }},
+        (error) => {{
+          recordDesktopLinkDiagnostic('open-external-error', {{
+            href: url.href,
+            error: String(error)
+          }});
+          originalOpen?.(url.href, target, features);
+        }}
+      );
+      return null;
+    }};
+  }}
+
+  function installExternalFormBridge() {{
+    document.addEventListener(
+      'submit',
       (event) => {{
-        if (
-          event.defaultPrevented ||
-          event.button !== 0 ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.altKey ||
-          event.shiftKey
-        ) {{
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.action) {{
           return;
         }}
 
-        const anchor = contextMenuAnchor(event.target);
-        if (!anchor?.href) {{
-          return;
-        }}
-
-        const url = desktopExternalURL(anchor.href);
+        const url = desktopExternalURL(form.action);
         if (!url) {{
           return;
         }}
 
         event.preventDefault();
-        void openExternalURL(url).catch(() => {{
-          globalThis.location.href = url.href;
-        }});
+        recordDesktopLinkDiagnostic('submit-open-external', {{ href: url.href }});
+        void openExternalURL(url).then(
+          () => {{
+            recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
+          }},
+          (error) => {{
+            recordDesktopLinkDiagnostic('open-external-error', {{
+              href: url.href,
+              error: String(error)
+            }});
+            globalThis.location.href = url.href;
+          }}
+        );
       }},
       true
     );
@@ -338,6 +479,8 @@ fn remote_main_init_script() -> Result<String, String> {
   }}
 
   installExternalLinkBridge();
+  installWindowOpenBridge();
+  installExternalFormBridge();
   installDesktopContextMenu();
   installUnreadBadgeBridge();
 
@@ -1191,11 +1334,115 @@ mod tests {
         assert!(script.contains("installExternalLinkBridge"));
         assert!(script.contains("document.addEventListener(\n      'click'"));
         assert!(script.contains("contextMenuAnchor(event.target)"));
+        assert!(script.contains("event.composedPath?.()"));
         assert!(script.contains("url.protocol === 'mailto:'"));
         assert!(script.contains("url.protocol !== 'http:' && url.protocol !== 'https:'"));
         assert!(script.contains("url.origin === globalThis.location.origin ? null : url"));
-        assert!(script.contains("invoke?.('open_external_link', { url: url.href })"));
+        assert!(script.contains("Tauri IPC invoke is not available"));
+        assert!(script.contains("invoke('open_external_link', { url: url.href })"));
+        assert!(script.contains("invoke('plugin:opener|open_url', { url: url.href })"));
         assert!(script.contains("event.preventDefault()"));
+        assert!(script.contains("event.stopImmediatePropagation?.()"));
+        assert!(script.contains("globalThis.addEventListener('click', onExternalLinkClick, true)"));
+        assert!(script.contains("__EX_DESKTOP_LINK_DIAGNOSTICS__"));
+        assert!(script.contains("__EX_DESKTOP_TEST_EXTERNAL_LINK__"));
+        assert!(script.contains("installWindowOpenBridge"));
+        assert!(script.contains("installExternalFormBridge"));
+        assert!(script.contains("open-external-app-command-error"));
+        assert!(script.contains("open-external-error"));
+    }
+
+    #[test]
+    fn remote_chat_capability_allows_only_required_injected_commands() {
+        use std::str::FromStr;
+
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/remote-chat.json")).unwrap();
+        let urls = capability
+            .pointer("/remote/urls")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        let permissions = capability
+            .get("permissions")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        let permissions = permissions
+            .iter()
+            .map(|permission| permission.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert!(urls.iter().any(|url| url == "http://*"));
+        assert!(urls.iter().any(|url| url == "http://*:*"));
+        assert!(urls.iter().any(|url| url == "https://*"));
+        assert!(urls.iter().any(|url| url == "https://*:*"));
+        for (pattern, url) in [
+            (
+                "http://*:*",
+                "http://localhost:5173/channel/general?x=1#message",
+            ),
+            (
+                "https://*",
+                "https://chat.example.com/channel/general?x=1#message",
+            ),
+            (
+                "https://*:*",
+                "https://chat.example.com:8443/channel/general?x=1#message",
+            ),
+        ] {
+            let pattern = tauri::utils::acl::RemoteUrlPattern::from_str(pattern).unwrap();
+            assert!(
+                pattern.test(&Url::parse(url).unwrap()),
+                "remote pattern must match full chat page URLs"
+            );
+        }
+        assert_eq!(
+            permissions,
+            vec![
+                "allow-show-setup-window",
+                "allow-start-relogin",
+                "allow-set-badge-count",
+                "allow-open-external-link",
+                "opener:allow-default-urls",
+                "opener:allow-open-url",
+            ]
+        );
+        assert!(!permissions.iter().any(|permission| {
+            permission.starts_with("store:")
+                || permission.starts_with("updater:")
+                || permission.starts_with("global-shortcut:")
+        }));
+    }
+
+    #[test]
+    fn app_manifest_generates_permissions_for_remote_injected_commands() {
+        let build_script = include_str!("../build.rs");
+
+        for command in [
+            "show_setup_window",
+            "start_relogin",
+            "set_badge_count",
+            "open_external_link",
+        ] {
+            assert!(
+                build_script.contains(command),
+                "build.rs must generate an allow/deny permission for {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn csp_allows_tauri_ipc_connect_sources() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = config
+            .pointer("/app/security/csp")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+
+        assert!(csp.contains("connect-src"));
+        assert!(csp.contains("ipc:"));
+        assert!(csp.contains("http://ipc.localhost"));
     }
 
     #[test]
