@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   IS_TAURI,
@@ -53,26 +53,25 @@ export default function App() {
     };
   }, []);
 
-  const normalizedUrl = useMemo(() => normalizeServerUrl(serverUrl), [serverUrl]);
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submittedUrl = normalizeServerUrl(serverUrl);
     setError('');
     setStatus('');
 
-    if (!normalizedUrl) {
+    if (!submittedUrl) {
       setError('Enter the full workspace URL, including https://');
       return;
     }
 
     let safeUrl: string;
     try {
-      const parsedUrl = new URL(normalizedUrl);
+      const parsedUrl = new URL(submittedUrl);
       if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
         setError('Enter a valid http(s) workspace URL.');
         return;
       }
-      safeUrl = parsedUrl.toString();
+      safeUrl = normalizeServerUrl(parsedUrl.toString());
     } catch {
       setError('Enter a valid workspace URL, including https://');
       return;
@@ -177,7 +176,7 @@ export default function App() {
               </p>
             )}
           <p className="mt-6 text-sm text-slate-500">
-            You can change the server later from the tray menu.
+            You can change the server later from the ex menu or tray menu.
           </p>
         </section>
       </div>
