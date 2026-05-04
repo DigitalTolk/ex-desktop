@@ -40,7 +40,6 @@ fn configure_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let reload_i = MenuItem::with_id(app, "reload-chat", "Reload Chat", true, Some("CmdOrCtrl+R"))?;
     let test_notification_i = MenuItem::with_id(
         app,
         "test-notification",
@@ -58,13 +57,16 @@ fn configure_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
 
     if let Some(MenuItemKind::Submenu(first_menu)) = app_menu.items()?.into_iter().next() {
-        first_menu.prepend_items(&[
-            &switch_chat_url_i,
-            &reload_i,
-            &test_notification_i,
-            &test_background_notification_i,
-            &sep,
-        ])?;
+        let insert_position = if first_menu.items()?.is_empty() { 0 } else { 1 };
+        first_menu.insert_items(
+            &[
+                &switch_chat_url_i,
+                &test_notification_i,
+                &test_background_notification_i,
+                &sep,
+            ],
+            insert_position,
+        )?;
     }
 
     app.set_menu(app_menu)?;
@@ -234,11 +236,6 @@ pub fn run() {
 
             app.on_menu_event(|app, event| match event.id.as_ref() {
                 "switch-chat-url" => show_change_server(app),
-                "reload-chat" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.eval("globalThis.location.reload()");
-                    }
-                }
                 "test-notification" => {
                     if let Err(err) = commands::send_desktop_notification(
                         app.clone(),
@@ -328,6 +325,7 @@ pub fn run() {
             commands::request_notification_attention,
             commands::send_desktop_notification,
             commands::set_badge_count,
+            commands::open_external_link,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ex desktop");
