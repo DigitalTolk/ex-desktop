@@ -112,31 +112,8 @@ fn remote_main_init_script() -> Result<String, String> {
     writable: false,
     configurable: false
   }});
-  Object.defineProperty(globalThis, '__EX_DESKTOP_LINK_DIAGNOSTICS__', {{
-    value: [],
-    writable: false,
-    configurable: false
-  }});
 
   let authRequiredShown = false;
-
-  function recordDesktopLinkDiagnostic(event, detail) {{
-    const entry = {{
-      event,
-      detail,
-      href: globalThis.location.href,
-      timestamp: new Date().toISOString()
-    }};
-    try {{
-      globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.push(entry);
-      if (globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.length > 50) {{
-        globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__.shift();
-      }}
-    }} catch {{}}
-    try {{
-      console.info('[ex-desktop-link]', event, detail);
-    }} catch {{}}
-  }}
 
   function unreadCountFromTitle() {{
     const match = /^\\((\\d+)\\)\\s+/.exec(document.title || '');
@@ -232,11 +209,7 @@ fn remote_main_init_script() -> Result<String, String> {
     if (typeof invoke !== 'function') {{
       return Promise.reject(new Error('Tauri IPC invoke is not available'));
     }}
-    return invoke('open_external_link', {{ url: url.href }}).catch((appCommandError) => {{
-      recordDesktopLinkDiagnostic('open-external-app-command-error', {{
-        href: url.href,
-        error: String(appCommandError)
-      }});
+    return invoke('open_external_link', {{ url: url.href }}).catch(() => {{
       return invoke('plugin:opener|open_url', {{ url: url.href }});
     }});
   }}
@@ -256,32 +229,19 @@ fn remote_main_init_script() -> Result<String, String> {
 
       const anchor = eventAnchor(event);
       if (!anchor?.href) {{
-        recordDesktopLinkDiagnostic('click-no-anchor', {{
-          target: event.target?.nodeName || null
-        }});
         return;
       }}
 
       const url = desktopExternalURL(anchor.href);
       if (!url) {{
-        recordDesktopLinkDiagnostic('click-internal-or-unsupported', {{
-          href: anchor.href
-        }});
         return;
       }}
 
       event.preventDefault();
       event.stopImmediatePropagation?.();
-      recordDesktopLinkDiagnostic('click-open-external', {{ href: url.href }});
       void openExternalURL(url).then(
-        () => {{
-          recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
-        }},
+        () => {{}},
         (error) => {{
-          recordDesktopLinkDiagnostic('open-external-error', {{
-            href: url.href,
-            error: String(error)
-          }});
           globalThis.location.href = url.href;
         }}
       );
@@ -293,22 +253,6 @@ fn remote_main_init_script() -> Result<String, String> {
       onExternalLinkClick,
       true
     );
-
-    globalThis.__EX_DESKTOP_TEST_EXTERNAL_LINK__ = () => {{
-      const anchor = document.createElement('a');
-      anchor.href = 'https://example.com/ex-desktop-link-test';
-      anchor.textContent = 'ex desktop link test';
-      anchor.style.position = 'fixed';
-      anchor.style.left = '0';
-      anchor.style.top = '0';
-      anchor.style.zIndex = '2147483647';
-      anchor.setAttribute('data-ex-desktop-test-link', 'true');
-      document.body?.appendChild(anchor);
-      recordDesktopLinkDiagnostic('test-link-click-dispatch', {{ href: anchor.href }});
-      anchor.click();
-      globalThis.setTimeout(() => anchor.remove(), 1000);
-      return globalThis.__EX_DESKTOP_LINK_DIAGNOSTICS__;
-    }};
   }}
 
   function installWindowOpenBridge() {{
@@ -318,16 +262,9 @@ fn remote_main_init_script() -> Result<String, String> {
       if (!url) {{
         return originalOpen?.(rawUrl, target, features) || null;
       }}
-      recordDesktopLinkDiagnostic('window-open-external', {{ href: url.href }});
       void openExternalURL(url).then(
-        () => {{
-          recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
-        }},
+        () => {{}},
         (error) => {{
-          recordDesktopLinkDiagnostic('open-external-error', {{
-            href: url.href,
-            error: String(error)
-          }});
           originalOpen?.(url.href, target, features);
         }}
       );
@@ -350,16 +287,9 @@ fn remote_main_init_script() -> Result<String, String> {
         }}
 
         event.preventDefault();
-        recordDesktopLinkDiagnostic('submit-open-external', {{ href: url.href }});
         void openExternalURL(url).then(
-          () => {{
-            recordDesktopLinkDiagnostic('open-external-ok', {{ href: url.href }});
-          }},
+          () => {{}},
           (error) => {{
-            recordDesktopLinkDiagnostic('open-external-error', {{
-              href: url.href,
-              error: String(error)
-            }});
             globalThis.location.href = url.href;
           }}
         );
@@ -1344,12 +1274,11 @@ mod tests {
         assert!(script.contains("event.preventDefault()"));
         assert!(script.contains("event.stopImmediatePropagation?.()"));
         assert!(script.contains("globalThis.addEventListener('click', onExternalLinkClick, true)"));
-        assert!(script.contains("__EX_DESKTOP_LINK_DIAGNOSTICS__"));
-        assert!(script.contains("__EX_DESKTOP_TEST_EXTERNAL_LINK__"));
         assert!(script.contains("installWindowOpenBridge"));
         assert!(script.contains("installExternalFormBridge"));
-        assert!(script.contains("open-external-app-command-error"));
-        assert!(script.contains("open-external-error"));
+        assert!(!script.contains("__EX_DESKTOP_LINK_DIAGNOSTICS__"));
+        assert!(!script.contains("__EX_DESKTOP_TEST_EXTERNAL_LINK__"));
+        assert!(!script.contains("console.info('[ex-desktop-link]'"));
     }
 
     #[test]
