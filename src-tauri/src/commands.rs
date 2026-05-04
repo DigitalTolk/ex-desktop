@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
+use tauri::webview::{DownloadEvent, NewWindowResponse, WebviewWindowBuilder};
 use tauri::{image::Image, webview::PageLoadEvent, AppHandle, Manager, WebviewUrl, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
@@ -67,6 +67,56 @@ fn remote_main_init_script() -> Result<String, String> {
     }}
   }}
 
+  function unreadCountFromTitle() {{
+    const match = /^\\((\\d+)\\)\\s+/.exec(document.title || '');
+    if (!match) {{
+      return 0;
+    }}
+    const count = Number.parseInt(match[1], 10);
+    return Number.isFinite(count) && count > 0 ? count : 0;
+  }}
+
+  function installUnreadBadgeBridge() {{
+    let lastCount = -1;
+    function syncUnreadBadge() {{
+      const count = unreadCountFromTitle();
+      if (count === lastCount) {{
+        return;
+      }}
+      lastCount = count;
+      try {{
+        globalThis.__TAURI_INTERNALS__?.invoke('set_badge_count', {{ count }});
+      }} catch {{
+        // ignore
+      }}
+    }}
+
+    function observeTitle() {{
+      const title = document.querySelector('title');
+      if (!title) {{
+        return false;
+      }}
+      syncUnreadBadge();
+      new MutationObserver(syncUnreadBadge).observe(title, {{
+        childList: true,
+        characterData: true,
+        subtree: true
+      }});
+      return true;
+    }}
+
+    if (observeTitle()) {{
+      return;
+    }}
+    let attempts = 0;
+    const timer = globalThis.setInterval(() => {{
+      attempts += 1;
+      if (observeTitle() || attempts >= 20) {{
+        globalThis.clearInterval(timer);
+      }}
+    }}, 250);
+  }}
+
   if (!installNotificationAttentionBridge()) {{
     let attempts = 0;
     const timer = globalThis.setInterval(() => {{
@@ -76,6 +126,7 @@ fn remote_main_init_script() -> Result<String, String> {
       }}
     }}, 250);
   }}
+  installUnreadBadgeBridge();
 
   function showAuthRequired() {{
     if (authRequiredShown || document.getElementById('__ex-desktop-auth-required')) {{
@@ -370,6 +421,7 @@ pub(crate) fn open_or_navigate_main_window(
     let parsed = Url::parse(server_url).map_err(|e| e.to_string())?;
     let init_script = remote_main_init_script()?;
     let app_handle = app.clone();
+    let new_window_app_handle = app.clone();
     let download_app_handle = app.clone();
     let data_dir = webview_data_dir(app)?;
 
@@ -382,6 +434,13 @@ pub(crate) fn open_or_navigate_main_window(
 
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(parsed))
         .on_navigation(move |url| intercept_navigation(&app_handle, url))
+        .on_new_window(move |url, _features| {
+            if handle_new_window_request(&new_window_app_handle, &url) {
+                NewWindowResponse::Deny
+            } else {
+                NewWindowResponse::Allow
+            }
+        })
         .on_download(move |_webview, event| match event {
             DownloadEvent::Requested { url, destination } => {
                 if let Some(path) = default_download_path(&download_app_handle, &url) {
@@ -478,6 +537,16 @@ fn is_workspace_url(app: &AppHandle, url: &Url) -> bool {
 
 fn should_open_externally(app: &AppHandle, url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https" | "mailto") && !is_workspace_url(app, url)
+}
+
+fn handle_new_window_request(app: &AppHandle, url: &Url) -> bool {
+    if matches!(url.scheme(), "http" | "https" | "mailto") {
+        if let Err(err) = open_external_url(app, url) {
+            log::warn!("Could not open new-window URL: {err}");
+        }
+        return true;
+    }
+    false
 }
 
 fn filename_for_download(url: &Url, content_disposition: Option<&str>) -> String {
@@ -773,6 +842,15 @@ pub fn request_notification_attention(app: AppHandle) -> Result<(), String> {
 /// Updates the tray icon and tooltip to reflect the unread message count.
 #[tauri::command]
 pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let title = if count > 0 {
+            format!("({count}) ex")
+        } else {
+            "ex".to_string()
+        };
+        let _ = window.set_title(&title);
+    }
+
     let Some(tray) = app.tray_by_id("main") else {
         return Ok(());
     };
@@ -782,7 +860,7 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
         tray.set_icon_with_as_template(Some(icon), true)
             .map_err(|e| e.to_string())?;
         tray.set_tooltip(Some(&format!(
-            "ex — {} unread message{}",
+            "ex — {} unread notification{}",
             count,
             if count == 1 { "" } else { "s" }
         )))
@@ -801,13 +879,23 @@ pub fn set_badge_count(app: AppHandle, count: u32) -> Result<(), String> {
 mod tests {
     use super::{
         filename_for_download, filename_from_content_disposition, is_attachment_download_url,
-        login_url_for_server, oidc_callback_query, percent_decode, same_origin, sanitize_filename,
+        login_url_for_server, oidc_callback_query, percent_decode, remote_main_init_script,
+        same_origin, sanitize_filename,
     };
     use url::Url;
 
     #[test]
     fn callback_query_contains_only_access_token() {
         assert_eq!(oidc_callback_query("access token"), "token=access+token");
+    }
+
+    #[test]
+    fn remote_init_script_bridges_unread_title_to_badge_count() {
+        let script = remote_main_init_script().unwrap();
+
+        assert!(script.contains("unreadCountFromTitle"));
+        assert!(script.contains("invoke('set_badge_count', { count })"));
+        assert!(script.contains("MutationObserver(syncUnreadBadge)"));
     }
 
     #[test]
